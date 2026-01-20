@@ -8,3 +8,4 @@ cases/
 streamlit.log
 *.sqlite
 .env
+sample_data/
