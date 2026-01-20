@@ -130,3 +130,61 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_events_unique_source_event
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_unique_fingerprint
   ON events(case_id, fingerprint)
   WHERE fingerprint IS NOT NULL;
+
+-- Entity notes for analyst annotations
+CREATE TABLE IF NOT EXISTS entity_notes (
+  case_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_value TEXT NOT NULL,
+  notes TEXT,
+  tags TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (case_id, entity_type, entity_value),
+  FOREIGN KEY (case_id) REFERENCES cases(case_id)
+);
+
+-- Entity aliases for deduplication
+CREATE TABLE IF NOT EXISTS entity_aliases (
+  alias_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  canonical_value TEXT NOT NULL,
+  alias_value TEXT NOT NULL,
+  confidence REAL DEFAULT 1.0,
+  source TEXT,
+  FOREIGN KEY (case_id) REFERENCES cases(case_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_lookup
+  ON entity_aliases(case_id, entity_type, alias_value);
+
+-- Bookmarked events for investigation tracking
+CREATE TABLE IF NOT EXISTS bookmarked_events (
+  bookmark_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id TEXT NOT NULL,
+  event_pk INTEGER NOT NULL,
+  label TEXT,
+  notes TEXT,
+  color TEXT DEFAULT 'yellow',
+  created_at TEXT,
+  FOREIGN KEY (case_id) REFERENCES cases(case_id),
+  FOREIGN KEY (event_pk) REFERENCES events(event_pk)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_unique
+  ON bookmarked_events(case_id, event_pk);
+
+-- Timeline markers for key investigation moments
+CREATE TABLE IF NOT EXISTS timeline_markers (
+  marker_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id TEXT NOT NULL,
+  marker_ts TEXT NOT NULL,
+  label TEXT NOT NULL,
+  description TEXT,
+  color TEXT DEFAULT '#ff6b6b',
+  created_at TEXT,
+  FOREIGN KEY (case_id) REFERENCES cases(case_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_timeline_markers_case_ts
+  ON timeline_markers(case_id, marker_ts);

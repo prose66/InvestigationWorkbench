@@ -51,6 +51,19 @@ RELATED_ENTITY_MAP = {
     ],
 }
 
+# Extended fields available for column visibility
+EXTENDED_COLUMNS = [
+    "dns_query", "url", "tactic", "technique", "file_path", "file_name",
+    "registry_key", "registry_value", "bytes_in", "bytes_out",
+    "src_port", "dest_port", "protocol", "logon_type", "session_id",
+    "process_cmdline", "parent_process_name", "artifact_type",
+]
+
+DEFAULT_COLUMNS = [
+    "event_ts", "source_system", "event_type", "host", "user",
+    "src_ip", "dest_ip", "process_name", "outcome", "severity", "message",
+]
+
 st.set_page_config(page_title="Investigation Workbench", layout="wide")
 
 
@@ -96,6 +109,54 @@ def table_exists(case_id: str, table_name: str) -> bool:
     sql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
     row = query_one(case_id, sql, (table_name,))
     return bool(row)
+
+
+def toggle_bookmark(case_id: str, event_pk: int, label: str = "") -> bool:
+    """Toggle bookmark for an event. Returns True if bookmarked, False if removed."""
+    with sqlite3.connect(db_path(case_id)) as conn:
+        existing = conn.execute(
+            "SELECT bookmark_id FROM bookmarked_events WHERE case_id = ? AND event_pk = ?",
+            (case_id, event_pk),
+        ).fetchone()
+        if existing:
+            conn.execute("DELETE FROM bookmarked_events WHERE case_id = ? AND event_pk = ?", (case_id, event_pk))
+            return False
+        else:
+            conn.execute(
+                "INSERT INTO bookmarked_events(case_id, event_pk, label, created_at) VALUES (?, ?, ?, ?)",
+                (case_id, event_pk, label, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")),
+            )
+            return True
+
+
+def get_bookmarked_pks(case_id: str) -> set:
+    """Get set of bookmarked event PKs for a case."""
+    if not table_exists(case_id, "bookmarked_events"):
+        return set()
+    df = query_df(case_id, "SELECT event_pk FROM bookmarked_events WHERE case_id = ?", (case_id,))
+    return set(df["event_pk"].tolist()) if not df.empty else set()
+
+
+def add_timeline_marker(case_id: str, marker_ts: str, label: str, description: str = "", color: str = "#ff6b6b") -> None:
+    """Add a timeline marker for a key investigation moment."""
+    with sqlite3.connect(db_path(case_id)) as conn:
+        conn.execute(
+            "INSERT INTO timeline_markers(case_id, marker_ts, label, description, color, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (case_id, marker_ts, label, description, color, datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")),
+        )
+
+
+def get_timeline_markers(case_id: str) -> pd.DataFrame:
+    """Get all timeline markers for a case."""
+    if not table_exists(case_id, "timeline_markers"):
+        return pd.DataFrame()
+    return query_df(case_id, "SELECT marker_id, marker_ts, label, description, color FROM timeline_markers WHERE case_id = ?", (case_id,))
+
+
+def delete_timeline_marker(case_id: str, marker_id: int) -> None:
+    """Delete a timeline marker."""
+    with sqlite3.connect(db_path(case_id)) as conn:
+        conn.execute("DELETE FROM timeline_markers WHERE case_id = ? AND marker_id = ?", (case_id, marker_id))
 
 
 def entity_options(case_id: str, entity_type: str, limit: int = 500) -> List[str]:
@@ -313,6 +374,105 @@ def page_case_overview(case_id: str) -> None:
     )
     st.dataframe(runs_df, use_container_width=True)
 
+    # Coverage gap detection
+    st.markdown("### Coverage Gaps")
+    gap_df = query_df(
+        case_id,
+        """
+        SELECT source_system,
+               MIN(time_start) AS earliest_coverage,
+               MAX(time_end) AS latest_coverage
+        FROM query_runs
+        WHERE case_id = ?
+        GROUP BY source_system
+        """,
+        (case_id,),
+    )
+    if not gap_df.empty and not runs_df.empty:
+        # Find gaps within each source's event data
+        event_gaps_df = query_df(
+            case_id,
+            """
+            WITH ordered_events AS (
+                SELECT source_system, event_ts,
+                       LAG(event_ts) OVER (PARTITION BY source_system ORDER BY event_ts) AS prev_ts
+                FROM events
+                WHERE case_id = ?
+            ),
+            gaps AS (
+                SELECT source_system, prev_ts AS gap_start, event_ts AS gap_end,
+                       (julianday(event_ts) - julianday(prev_ts)) * 24 AS gap_hours
+                FROM ordered_events
+                WHERE prev_ts IS NOT NULL
+            )
+            SELECT source_system, gap_start, gap_end, ROUND(gap_hours, 1) AS gap_hours
+            FROM gaps
+            WHERE gap_hours >= 1
+            ORDER BY gap_hours DESC
+            LIMIT 20
+            """,
+            (case_id,),
+        )
+        if not event_gaps_df.empty:
+            st.warning(f"Found {len(event_gaps_df)} coverage gaps >= 1 hour")
+            st.dataframe(event_gaps_df, use_container_width=True)
+
+            # Visualize gaps as a Gantt-style chart
+            gap_chart_df = event_gaps_df.copy()
+            gap_chart_df["gap_start"] = pd.to_datetime(gap_chart_df["gap_start"])
+            gap_chart_df["gap_end"] = pd.to_datetime(gap_chart_df["gap_end"])
+            gap_chart = alt.Chart(gap_chart_df).mark_bar(color="#ff6b6b", opacity=0.7).encode(
+                x=alt.X("gap_start:T", title="Time"),
+                x2="gap_end:T",
+                y=alt.Y("source_system:N", title="Source"),
+                tooltip=["source_system:N", "gap_start:T", "gap_end:T", "gap_hours:Q"],
+            ).properties(title="Coverage Gaps by Source (>= 1 hour)")
+            st.altair_chart(gap_chart, use_container_width=True)
+        else:
+            st.success("No significant coverage gaps detected (all gaps < 1 hour)")
+
+        # Show coverage spans per source
+        st.markdown("#### Coverage Spans by Source")
+        coverage_df = query_df(
+            case_id,
+            """
+            SELECT source_system,
+                   MIN(event_ts) AS first_event,
+                   MAX(event_ts) AS last_event,
+                   COUNT(*) AS event_count
+            FROM events
+            WHERE case_id = ?
+            GROUP BY source_system
+            ORDER BY first_event
+            """,
+            (case_id,),
+        )
+        if not coverage_df.empty:
+            coverage_df["first_event"] = pd.to_datetime(coverage_df["first_event"])
+            coverage_df["last_event"] = pd.to_datetime(coverage_df["last_event"])
+            span_chart = alt.Chart(coverage_df).mark_bar(opacity=0.8).encode(
+                x=alt.X("first_event:T", title="Time"),
+                x2="last_event:T",
+                y=alt.Y("source_system:N", title="Source", sort="-x"),
+                color=alt.Color("source_system:N", legend=None),
+                tooltip=["source_system:N", "first_event:T", "last_event:T", "event_count:Q"],
+            ).properties(title="Event Coverage by Source")
+            st.altair_chart(span_chart, use_container_width=True)
+    else:
+        st.info("No query runs available for gap analysis.")
+
+    # Export Investigation Report
+    st.markdown("### Export Report")
+    st.caption("Generate a Markdown report with case summary, bookmarks, entity notes, and timeline markers.")
+    if st.button("Generate Investigation Report"):
+        report = generate_investigation_report(case_id)
+        st.download_button(
+            label="Download Report (Markdown)",
+            data=report,
+            file_name=f"{case_id}_report.md",
+            mime="text/markdown",
+        )
+
 
 def page_timeline(case_id: str) -> None:
     st.subheader("Timeline Explorer")
@@ -374,6 +534,16 @@ def page_timeline(case_id: str) -> None:
         selected_hashes,
     )
 
+    # Column visibility selector
+    with st.expander("Column Visibility", expanded=False):
+        available_cols = DEFAULT_COLUMNS + EXTENDED_COLUMNS
+        selected_columns = st.multiselect(
+            "Columns to display",
+            available_cols,
+            default=DEFAULT_COLUMNS,
+            key="timeline_columns",
+        )
+
     bucket_fmt, bucket_label = timeline_bucket_format(start_dt, end_dt)
     timeline_df = query_df(
         case_id,
@@ -387,26 +557,79 @@ def page_timeline(case_id: str) -> None:
         tuple(params),
     )
     if not timeline_df.empty:
-        chart = alt.Chart(timeline_df).mark_line(point=True).encode(
+        base_chart = alt.Chart(timeline_df).mark_line(point=True).encode(
             x=alt.X("bucket:T", title=f"Time ({bucket_label})"),
             y=alt.Y("count:Q", title="Events"),
             tooltip=["bucket:T", "count:Q"],
         )
+
+        # Add timeline markers as vertical rules
+        markers_df = get_timeline_markers(case_id)
+        if not markers_df.empty:
+            markers_df["marker_ts"] = pd.to_datetime(markers_df["marker_ts"])
+            marker_rules = alt.Chart(markers_df).mark_rule(strokeDash=[4, 4], strokeWidth=2).encode(
+                x="marker_ts:T",
+                color=alt.Color("color:N", scale=None),
+                tooltip=["label:N", "marker_ts:T", "description:N"],
+            )
+            marker_labels = alt.Chart(markers_df).mark_text(
+                align="left", dx=5, dy=-10, fontSize=10
+            ).encode(
+                x="marker_ts:T",
+                text="label:N",
+                color=alt.Color("color:N", scale=None),
+            )
+            chart = base_chart + marker_rules + marker_labels
+        else:
+            chart = base_chart
+
         st.altair_chart(chart, use_container_width=True)
     else:
         st.warning("No events match the selected filters.")
+
+    # Marker management
+    with st.expander("Timeline Markers", expanded=False):
+        st.markdown("##### Add New Marker")
+        marker_col1, marker_col2 = st.columns(2)
+        new_marker_ts = marker_col1.text_input("Timestamp (ISO8601, e.g. 2024-07-01T12:00:00Z)", key="new_marker_ts")
+        new_marker_label = marker_col2.text_input("Label", key="new_marker_label")
+        new_marker_desc = st.text_input("Description (optional)", key="new_marker_desc")
+        marker_color = st.color_picker("Color", value="#ff6b6b", key="marker_color")
+        if st.button("Add Marker") and new_marker_ts and new_marker_label:
+            try:
+                add_timeline_marker(case_id, new_marker_ts, new_marker_label, new_marker_desc, marker_color)
+                st.success(f"Added marker: {new_marker_label}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to add marker: {e}")
+
+        # List existing markers
+        existing_markers = get_timeline_markers(case_id)
+        if not existing_markers.empty:
+            st.markdown("##### Existing Markers")
+            for _, marker in existing_markers.iterrows():
+                mcol1, mcol2, mcol3 = st.columns([3, 2, 1])
+                mcol1.write(f"**{marker['label']}** - {marker['marker_ts']}")
+                mcol2.write(marker.get('description') or '')
+                if mcol3.button("Delete", key=f"del_marker_{marker['marker_id']}"):
+                    delete_timeline_marker(case_id, marker['marker_id'])
+                    st.rerun()
 
     page_size = st.selectbox("Rows per page", [25, 50, 100], index=1)
     page = st.number_input("Page", min_value=1, value=1, step=1)
     offset = (page - 1) * page_size
 
+    # Build dynamic SELECT with extended columns
+    base_cols = ["event_pk", "event_ts", "source_system", "event_type", "host", "user", "src_ip", "dest_ip",
+                 "process_name", "outcome", "severity", "message", "source_event_id", "raw_ref", "raw_json"]
+    extra_cols = [c for c in selected_columns if c not in base_cols and c in EXTENDED_COLUMNS]
+    all_cols = base_cols + extra_cols
+    select_cols = ", ".join([f"e.{c}" for c in all_cols])
+
     events_df = query_df(
         case_id,
         f"""
-        SELECT
-          e.event_pk, e.event_ts, e.source_system, e.event_type, e.host, e.user, e.src_ip, e.dest_ip,
-          e.process_name, e.outcome, e.severity, e.message,
-          e.source_event_id, e.raw_ref, e.raw_json,
+        SELECT {select_cols},
           q.run_id, q.query_name, q.executed_at, q.time_start, q.time_end
         FROM events e
         JOIN query_runs q ON e.run_id = q.run_id
@@ -417,46 +640,61 @@ def page_timeline(case_id: str) -> None:
         tuple(params + [page_size, offset]),
     )
 
-    st.dataframe(
-        events_df[
-            [
-                "event_ts",
-                "source_system",
-                "event_type",
-                "host",
-                "user",
-                "src_ip",
-                "dest_ip",
-                "process_name",
-                "outcome",
-                "severity",
-                "message",
-            ]
-        ],
-        use_container_width=True,
-    )
+    # Add bookmark status column
+    bookmarked_pks = get_bookmarked_pks(case_id)
+    events_df["bookmarked"] = events_df["event_pk"].apply(lambda pk: "⭐" if pk in bookmarked_pks else "")
+
+    display_cols = ["bookmarked"] + [c for c in selected_columns if c in events_df.columns]
 
     if not events_df.empty:
-        selected_pk = st.selectbox(
-            "Select an event for provenance",
-            events_df["event_pk"].tolist(),
+        # Use selectable dataframe - click a row to select it
+        st.markdown("**Click a row to view details and bookmark**")
+        selection = st.dataframe(
+            events_df[display_cols],
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="timeline_events_table",
         )
-        selected = events_df[events_df["event_pk"] == selected_pk].iloc[0].to_dict()
-        st.markdown("#### Event Provenance")
-        st.write(
-            {
-                "run_id": selected["run_id"],
-                "query_name": selected["query_name"],
-                "executed_at": selected["executed_at"],
-                "time_start": selected["time_start"],
-                "time_end": selected["time_end"],
-                "raw_ref": selected["raw_ref"],
-                "source_event_id": selected["source_event_id"],
-            }
-        )
-        if selected.get("raw_json"):
-            st.markdown("#### Raw JSON")
-            st.json(selected["raw_json"])
+
+        # Get selected row from selection state
+        selected_rows = selection.selection.rows if selection.selection else []
+
+        if selected_rows:
+            selected_idx = selected_rows[0]
+            selected = events_df.iloc[selected_idx].to_dict()
+            selected_pk = selected["event_pk"]
+
+            st.markdown("---")
+            st.markdown("#### Selected Event")
+
+            # Bookmark toggle button
+            is_currently_bookmarked = selected_pk in bookmarked_pks
+            bookmark_label = "⭐ Remove Bookmark" if is_currently_bookmarked else "☆ Bookmark Event"
+            col1, col2 = st.columns([1, 4])
+            if col1.button(bookmark_label, key="toggle_bookmark"):
+                toggle_bookmark(case_id, selected_pk)
+                st.rerun()
+
+            st.markdown("#### Event Provenance")
+            st.write(
+                {
+                    "run_id": selected["run_id"],
+                    "query_name": selected["query_name"],
+                    "executed_at": selected["executed_at"],
+                    "time_start": selected["time_start"],
+                    "time_end": selected["time_end"],
+                    "raw_ref": selected["raw_ref"],
+                    "source_event_id": selected["source_event_id"],
+                }
+            )
+            if selected.get("raw_json"):
+                st.markdown("#### Raw JSON")
+                st.json(selected["raw_json"])
+        else:
+            st.info("Click a row above to view event details and provenance.")
+    else:
+        st.warning("No events match the current filters.")
 
 
 def page_entity_explorer(case_id: str) -> None:
@@ -733,12 +971,12 @@ def page_swimlane_timeline(case_id: str) -> None:
         st.caption("No events in view.")
         return
 
-        st.dataframe(
-            visible_df[
-                ["event_ts", "source_system", "event_type", "host", "user", "message"]
-            ],
-            use_container_width=True,
-        )
+    st.dataframe(
+        visible_df[
+            ["event_ts", "source_system", "event_type", "host", "user", "message"]
+        ],
+        use_container_width=True,
+    )
 
     selected_pk = st.selectbox("Inspect event", visible_df["event_pk"].tolist())
     selected = visible_df[visible_df["event_pk"] == selected_pk].iloc[0].to_dict()
@@ -1171,6 +1409,188 @@ def page_entity_page(case_id: str) -> None:
             st.dataframe(source_cov, use_container_width=True)
 
 
+def page_bookmarks(case_id: str) -> None:
+    """Page for viewing and managing bookmarked events."""
+    st.subheader("Bookmarked Events")
+
+    if not table_exists(case_id, "bookmarked_events"):
+        st.info("No bookmarks table found. Bookmark events from the Timeline Explorer.")
+        return
+
+    bookmarks_df = query_df(
+        case_id,
+        """
+        SELECT b.bookmark_id, b.event_pk, b.label, b.notes, b.created_at,
+               e.event_ts, e.source_system, e.event_type, e.host, e.user, e.message,
+               e.src_ip, e.dest_ip, e.process_name, e.outcome, e.severity
+        FROM bookmarked_events b
+        JOIN events e ON b.event_pk = e.event_pk
+        WHERE b.case_id = ?
+        ORDER BY e.event_ts ASC
+        """,
+        (case_id,),
+    )
+
+    if bookmarks_df.empty:
+        st.info("No bookmarked events yet. Use the Timeline Explorer to bookmark events.")
+        return
+
+    st.metric("Bookmarked Events", len(bookmarks_df))
+
+    st.dataframe(
+        bookmarks_df[[
+            "event_ts", "source_system", "event_type", "host", "user",
+            "src_ip", "dest_ip", "process_name", "outcome", "severity", "message", "label"
+        ]],
+        use_container_width=True,
+    )
+
+    st.markdown("### Edit Bookmark")
+    selected_bookmark = st.selectbox(
+        "Select bookmark to edit",
+        bookmarks_df["bookmark_id"].tolist(),
+        format_func=lambda bid: f"{bookmarks_df[bookmarks_df['bookmark_id'] == bid].iloc[0]['event_ts']} - {bookmarks_df[bookmarks_df['bookmark_id'] == bid].iloc[0]['event_type']}"
+    )
+    selected_row = bookmarks_df[bookmarks_df["bookmark_id"] == selected_bookmark].iloc[0]
+
+    new_label = st.text_input("Label", value=selected_row.get("label") or "", key="bookmark_label")
+    new_notes = st.text_area("Notes", value=selected_row.get("notes") or "", key="bookmark_notes", height=100)
+
+    col1, col2 = st.columns(2)
+    if col1.button("Update Bookmark"):
+        with sqlite3.connect(db_path(case_id)) as conn:
+            conn.execute(
+                "UPDATE bookmarked_events SET label = ?, notes = ? WHERE bookmark_id = ?",
+                (new_label, new_notes, selected_bookmark),
+            )
+        st.success("Bookmark updated")
+        st.rerun()
+
+    if col2.button("Remove Bookmark", type="secondary"):
+        with sqlite3.connect(db_path(case_id)) as conn:
+            conn.execute("DELETE FROM bookmarked_events WHERE bookmark_id = ?", (selected_bookmark,))
+        st.success("Bookmark removed")
+        st.rerun()
+
+    # Show selected event details
+    st.markdown("### Event Details")
+    st.write({
+        "event_ts": selected_row["event_ts"],
+        "source_system": selected_row["source_system"],
+        "event_type": selected_row["event_type"],
+        "host": selected_row["host"],
+        "user": selected_row["user"],
+        "message": selected_row["message"],
+    })
+
+
+def generate_investigation_report(case_id: str) -> str:
+    """Generate a Markdown investigation report."""
+    lines = [f"# Investigation Report: {case_id}", ""]
+    lines.append(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    lines.append("")
+
+    # Summary
+    summary = query_one(case_id, "SELECT COUNT(*) AS total, COUNT(DISTINCT run_id) AS runs FROM events WHERE case_id = ?", (case_id,))
+    min_ts, max_ts = time_bounds(case_id)
+    lines.append("## Summary")
+    lines.append(f"- **Total Events:** {summary['total'] if summary else 0}")
+    lines.append(f"- **Query Runs:** {summary['runs'] if summary else 0}")
+    if min_ts and max_ts:
+        lines.append(f"- **Time Range:** {min_ts.isoformat()} to {max_ts.isoformat()}")
+    lines.append("")
+
+    # Sources
+    source_df = query_df(case_id, "SELECT source_system, COUNT(*) AS count FROM events WHERE case_id = ? GROUP BY source_system ORDER BY count DESC", (case_id,))
+    lines.append("## Data Sources")
+    for _, row in source_df.iterrows():
+        lines.append(f"- **{row['source_system']}:** {row['count']} events")
+    lines.append("")
+
+    # Timeline markers
+    markers_df = get_timeline_markers(case_id)
+    if not markers_df.empty:
+        lines.append("## Key Timeline Markers")
+        for _, row in markers_df.iterrows():
+            lines.append(f"### {row['marker_ts']} - {row['label']}")
+            if row.get("description"):
+                lines.append(f"{row['description']}")
+            lines.append("")
+
+    # Bookmarked events
+    if table_exists(case_id, "bookmarked_events"):
+        bookmarks_df = query_df(
+            case_id,
+            """
+            SELECT e.event_ts, e.source_system, e.event_type, e.host, e.user, e.message, b.label, b.notes
+            FROM bookmarked_events b
+            JOIN events e ON b.event_pk = e.event_pk
+            WHERE b.case_id = ?
+            ORDER BY e.event_ts
+            """,
+            (case_id,),
+        )
+        if not bookmarks_df.empty:
+            lines.append("## Bookmarked Events")
+            for _, row in bookmarks_df.iterrows():
+                lines.append(f"### {row['event_ts']} - {row['event_type']}")
+                if row.get("label"):
+                    lines.append(f"**Label:** {row['label']}")
+                lines.append(f"- **Host:** {row['host']}")
+                lines.append(f"- **User:** {row['user']}")
+                lines.append(f"- **Source:** {row['source_system']}")
+                lines.append(f"- **Message:** {row['message']}")
+                if row.get("notes"):
+                    lines.append(f"")
+                    lines.append(f"**Notes:** {row['notes']}")
+                lines.append("")
+
+    # Entity notes
+    if table_exists(case_id, "entity_notes"):
+        notes_df = query_df(case_id, "SELECT entity_type, entity_value, notes, tags FROM entity_notes WHERE case_id = ? AND notes IS NOT NULL AND notes != ''", (case_id,))
+        if not notes_df.empty:
+            lines.append("## Entity Notes")
+            for _, row in notes_df.iterrows():
+                lines.append(f"### {row['entity_type']}: {row['entity_value']}")
+                if row.get("tags"):
+                    lines.append(f"**Tags:** {row['tags']}")
+                lines.append("")
+                lines.append(row["notes"])
+                lines.append("")
+
+    # Coverage gaps
+    gap_df = query_df(
+        case_id,
+        """
+        WITH ordered_events AS (
+            SELECT source_system, event_ts,
+                   LAG(event_ts) OVER (PARTITION BY source_system ORDER BY event_ts) AS prev_ts
+            FROM events
+            WHERE case_id = ?
+        ),
+        gaps AS (
+            SELECT source_system, prev_ts AS gap_start, event_ts AS gap_end,
+                   (julianday(event_ts) - julianday(prev_ts)) * 24 AS gap_hours
+            FROM ordered_events
+            WHERE prev_ts IS NOT NULL
+        )
+        SELECT source_system, gap_start, gap_end, ROUND(gap_hours, 1) AS gap_hours
+        FROM gaps
+        WHERE gap_hours >= 1
+        ORDER BY gap_hours DESC
+        LIMIT 10
+        """,
+        (case_id,),
+    )
+    if not gap_df.empty:
+        lines.append("## Coverage Gaps (>= 1 hour)")
+        for _, row in gap_df.iterrows():
+            lines.append(f"- **{row['source_system']}:** {row['gap_hours']} hours ({row['gap_start']} to {row['gap_end']})")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def page_ask_ai(case_id: str) -> None:
     st.subheader("Ask AI (Stub)")
     question = st.text_input("Question")
@@ -1208,6 +1628,7 @@ def main() -> None:
         "Case Overview": page_case_overview,
         "Timeline Explorer": page_timeline,
         "Swimlane Timeline": page_swimlane_timeline,
+        "Bookmarks": page_bookmarks,
         "Entity Page": page_entity_page,
         "Ask AI (Stub)": page_ask_ai,
     }
