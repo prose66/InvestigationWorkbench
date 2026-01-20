@@ -5,7 +5,10 @@ __pycache__/
 *.pyd
 .DS_Store
 cases/
+!cases/demo/
+!cases/demo/**
 streamlit.log
 *.sqlite
 .env
 sample_data/
+!sample_data/**

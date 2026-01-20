@@ -20,8 +20,7 @@ def case_paths(case_id: str) -> dict:
     return {
         "case_dir": case_dir,
         "db_path": case_dir / "case.sqlite",
-        "raw_splunk": case_dir / "raw" / "splunk",
-        "raw_kusto": case_dir / "raw" / "kusto",
+        "raw_base": case_dir / "raw",
         "exports": case_dir / "exports",
         "notes": case_dir / "notes.md",
     }
@@ -29,7 +28,7 @@ def case_paths(case_id: str) -> dict:
 
 def init_case(case_id: str, title: Optional[str] = None) -> Path:
     paths = case_paths(case_id)
-    for key in ("raw_splunk", "raw_kusto", "exports"):
+    for key in ("raw_base", "exports"):
         paths[key].mkdir(parents=True, exist_ok=True)
     if not paths["notes"].exists():
         paths["notes"].write_text(f"# {case_id}\n\n", encoding="utf-8")
@@ -58,7 +57,7 @@ def add_run(
         raise FileNotFoundError(f"Case not initialized: {paths['db_path']}")
 
     run_id = str(uuid.uuid4())
-    raw_dir = paths["raw_splunk"] if source == "splunk" else paths["raw_kusto"]
+    raw_dir = paths["raw_base"] / source
     raw_dir.mkdir(parents=True, exist_ok=True)
     dest_path = raw_dir / f"{run_id}{file_path.suffix.lower()}"
     shutil.copy2(file_path, dest_path)
@@ -68,7 +67,7 @@ def add_run(
         conn.execute(
             """
             INSERT INTO query_runs(
-              run_id, case_id, source, query_name, query_text,
+              run_id, case_id, source_system, query_name, query_text,
               executed_at, time_start, time_end, raw_path, row_count, file_hash, ingested_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)
             """,
@@ -105,24 +104,75 @@ def ingest_run(case_id: str, run_id: str) -> int:
 
         insert_sql = """
             INSERT OR IGNORE INTO events(
-              case_id, run_id, event_ts, source, event_type, host, user, src_ip,
-              dest_ip, process_name, process_cmdline, file_hash, outcome, severity,
-              message, source_event_id, raw_ref, raw_json, fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              case_id, run_id, event_ts, source_system, source_name, event_type, host, user, src_ip,
+              dest_ip, process_name, process_cmdline, process_id, parent_pid,
+              parent_process_name, parent_process_cmdline, file_hash, file_path,
+              file_name, file_extension, file_size, file_owner, registry_hive,
+              registry_key, registry_value, registry_value_name, registry_value_type,
+              registry_value_data, dns_query, url, http_method, http_status, bytes_in,
+              bytes_out, src_port, dest_port, protocol, event_id, logon_type, session_id,
+              user_sid, integrity_level, artifact_type, artifact_path, edr_alert_id,
+              tactic, technique, outcome, severity, message, source_event_id, raw_ref,
+              raw_json, extras_json, fingerprint
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         count = 0
         batch: List[tuple] = []
+        extras_batch: List[tuple] = []
+        conn.execute(
+            """
+            CREATE TEMP TABLE IF NOT EXISTS event_fields_staging (
+              case_id TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              raw_ref TEXT NOT NULL,
+              field_name TEXT NOT NULL,
+              field_value TEXT
+            )
+            """
+        )
         for line_no, row in ingest_lib.iter_rows(raw_path):
             raw_ref = f"{run['raw_path']}#L{line_no}"
-            event = ingest_lib.prepare_event(case_id, run_id, raw_ref, row)
+            event, extras = ingest_lib.prepare_event(case_id, run_id, raw_ref, row)
             batch.append(event)
+            for field_name, field_value in extras.items():
+                extras_batch.append((case_id, run_id, raw_ref, field_name, field_value))
             if len(batch) >= 1000:
                 conn.executemany(insert_sql, batch)
                 count += len(batch)
                 batch.clear()
+            if len(extras_batch) >= 2000:
+                conn.executemany(
+                    """
+                    INSERT INTO event_fields_staging(case_id, run_id, raw_ref, field_name, field_value)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    extras_batch,
+                )
+                extras_batch.clear()
         if batch:
             conn.executemany(insert_sql, batch)
             count += len(batch)
+        if extras_batch:
+            conn.executemany(
+                """
+                INSERT INTO event_fields_staging(case_id, run_id, raw_ref, field_name, field_value)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                extras_batch,
+            )
+
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO event_fields(event_pk, case_id, field_name, field_value)
+            SELECT e.event_pk, s.case_id, s.field_name, s.field_value
+            FROM event_fields_staging s
+            JOIN events e
+              ON e.case_id = s.case_id
+             AND e.run_id = s.run_id
+             AND e.raw_ref = s.raw_ref
+            """
+        )
+        conn.execute("DELETE FROM event_fields_staging")
 
         conn.execute(
             "UPDATE query_runs SET row_count = ?, ingested_at = ? WHERE run_id = ?",
@@ -166,9 +216,9 @@ def export_timeline(case_id: str, fmt: str, output_path: Optional[Path]) -> Path
         df = pd.read_sql_query(
             """
             SELECT
-              e.event_ts, e.source, e.event_type, e.host, e.user, e.src_ip, e.dest_ip,
+              e.event_ts, e.source_system, e.source_name, e.event_type, e.host, e.user, e.src_ip, e.dest_ip,
               e.process_name, e.process_cmdline, e.file_hash, e.outcome, e.severity,
-              e.message, e.source_event_id, e.raw_ref, e.raw_json,
+              e.message, e.source_event_id, e.raw_ref, e.raw_json, e.extras_json,
               q.run_id, q.query_name, q.executed_at, q.time_start, q.time_end
             FROM events e
             JOIN query_runs q ON e.run_id = q.run_id

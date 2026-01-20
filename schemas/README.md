@@ -7,7 +7,8 @@ This project uses a single, unified event shape to normalize Splunk and Kusto qu
 | Column | Type | Notes |
 | --- | --- | --- |
 | event_ts | string (ISO 8601 UTC) | Example: `2024-07-01T12:34:56Z` |
-| source | string | `splunk` or `kusto` |
+| source_system | string | Origin system, e.g. `splunk`, `kusto`, `aws`, `host_forensics` |
+| source_name | string | Dataset/stream (recommended), e.g. `cloudtrail`, `wineventlog:security` |
 | event_type | string | Normalized type, e.g. `process_start` |
 | host | string | Hostname |
 | user | string | Username or principal |
@@ -19,6 +20,47 @@ This project uses a single, unified event shape to normalize Splunk and Kusto qu
 | outcome | string | `success`, `failure`, or `unknown` |
 | severity | string | `low`, `medium`, `high`, `critical` |
 | message | string | Human-readable summary |
+
+## Extended Fields (Optional, Nullable)
+
+These fields are first-class columns in SQLite. Leave them empty when not present.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| event_id | string | Source event ID or code |
+| logon_type | string | Auth/logon category |
+| session_id | string | Session identifier |
+| user_sid | string | User SID or UID |
+| integrity_level | string | Integrity or trust level |
+| process_id | string | Process ID |
+| parent_pid | string | Parent process ID |
+| parent_process_name | string | Parent process name |
+| parent_process_cmdline | string | Parent command line |
+| file_path | string | Full file path |
+| registry_hive | string | Registry hive name |
+| registry_key | string | Registry key path |
+| registry_value | string | Registry value |
+| registry_value_name | string | Registry value name |
+| registry_value_type | string | Registry value type |
+| registry_value_data | string | Registry value data |
+| dns_query | string | DNS query name |
+| url | string | URL or URI |
+| http_method | string | HTTP verb |
+| http_status | string | HTTP status code |
+| bytes_in | string | Inbound bytes |
+| bytes_out | string | Outbound bytes |
+| src_port | string | Source port |
+| dest_port | string | Destination port |
+| protocol | string | Network protocol |
+| artifact_type | string | Artifact category (plaso, registry, etc.) |
+| artifact_path | string | Artifact source path |
+| file_name | string | File name |
+| file_extension | string | File extension |
+| file_size | string | File size in bytes |
+| file_owner | string | File owner |
+| edr_alert_id | string | EDR alert identifier |
+| tactic | string | ATT&CK tactic |
+| technique | string | ATT&CK technique |
 
 ## Provenance Fields
 
@@ -33,7 +75,16 @@ These fields are stored at the query run level, but may also appear per row:
 | time_end | string (ISO 8601 UTC) | Query window end |
 | source_event_id | string | Upstream ID if available |
 | raw_json | string (JSON) | Optional raw payload |
+| extras_json | string (JSON) | Optional unmodeled fields |
 
 ## Optional Extensions
 
-Additional fields are allowed. Unknown columns are stored in `raw_json` when ingested.
+Additional fields are allowed. Unknown columns are stored in `extras_json` and also written to `event_fields`.
+
+## Event Fields Table
+
+When a field is not part of the core or extended schema, it is stored as a sparse key/value:
+
+`event_fields(event_pk, case_id, field_name, field_value)`
+
+This keeps the base table lean while preserving tool-specific fields.
