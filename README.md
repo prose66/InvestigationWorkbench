@@ -25,25 +25,25 @@ Investigation Workbench helps security analysts correlate events from multiple S
 
 ## Features
 
-### 🔍 Investigation-Focused Design
+### Investigation-Focused Design
 - **Case-first workflow** — each investigation is an isolated workspace
 - **Full provenance** — every event traces back to its source query
 - **Raw data preserved** — append-only storage, database is rebuildable
 
-### 📥 Flexible Ingestion
+### Flexible Ingestion
 - **Multi-source support** — Splunk, Kusto/Sentinel, AWS CloudTrail, Okta, generic NDJSON/CSV
 - **Auto field mapping** — source-specific mappers normalize timestamps and field names
 - **Fault-tolerant** — `--skip-errors` mode logs bad rows without aborting
 - **Duplicate detection** — warns if you add the same export twice
 
-### 📊 Visual Analysis
+### Visual Analysis
 - **Timeline Explorer** — filterable event timeline with time-based charts
 - **Swimlane View** — activity lanes by host, user, IP, or event type
 - **Entity Graph** — interactive network visualization of relationships
 - **Entity Comparison** — side-by-side diff of two entities
 - **Gap Detection** — highlights time periods with missing data
 
-### 🔖 Analyst Workflow
+### Analyst Workflow
 - **Bookmarks** — save interesting events with notes
 - **Timeline Markers** — annotate key moments in the investigation
 - **Entity Notes & Aliases** — track known-good/bad entities
@@ -187,17 +187,17 @@ Select your case from the sidebar dropdown.
 
 ## UI Pages
 
-### 📋 Case Overview
+### Case Overview
 High-level stats: event counts, source distribution, time coverage, query run provenance.
 
-### 📅 Timeline Explorer
+### Timeline Explorer
 - Filter by time range, source, event type, host, user, IP
 - Click events to see full details and raw JSON
 - Bookmark events, view provenance
 - Export filtered results to CSV
 - **Gap detection** shows data coverage blind spots
 
-### 🏊 Swimlane Timeline
+### Swimlane Timeline
 Lane-based visualization grouped by:
 - Host
 - User  
@@ -206,24 +206,24 @@ Lane-based visualization grouped by:
 
 Click any bar to drill down to those events.
 
-### 🕸️ Entity Graph
+### Entity Graph
 Interactive network graph showing relationships between:
 - Hosts ↔ Users ↔ IPs ↔ Processes ↔ File Hashes
 
 Node size = event count. Edge thickness = co-occurrence strength.
 Double-click to navigate to entity details.
 
-### 🔬 Entity Comparison
+### Entity Comparison
 Side-by-side analysis of two entities:
 - Activity metrics and time ranges
 - Event type overlap (common vs unique)
 - Timeline comparison chart
 - Outcome distribution
 
-### 🔖 Bookmarks
+### Bookmarks
 Manage saved events with labels and analyst notes.
 
-### 🔍 Search
+### Search
 Global keyword search across all event messages.
 
 ---
