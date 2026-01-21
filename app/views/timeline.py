@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from services.bookmarks import get_bookmarked_pks, toggle_bookmark
 from services.db import distinct_values, query_df, time_bounds
 from services.filters import build_filters
+from services.gaps import detect_timeline_gaps, get_source_coverage
 from services.markers import add_timeline_marker, delete_timeline_marker, get_timeline_markers
 
 
@@ -27,9 +28,16 @@ def page_timeline(case_id: str) -> None:
         st.info("No events ingested yet.")
         return
 
+    # Handle pivot from entity page
     pivot = st.session_state.get("timeline_pivot")
     if pivot:
         st.info(f"Pivot active: {pivot['column']} = {pivot['value']}")
+        if st.button("Clear pivot", key="clear_pivot"):
+            st.session_state.pop("timeline_pivot", None)
+            st.rerun()
+    
+    # Handle filter from overview drill-down
+    timeline_filter = st.session_state.pop("timeline_filter", None)
 
     sources = distinct_values(case_id, "source_system")
     event_types = distinct_values(case_id, "event_type")
@@ -53,10 +61,14 @@ def page_timeline(case_id: str) -> None:
     default_ips = [pivot["value"]] if pivot and pivot["column"] in ("src_ip", "dest_ip") else []
     default_processes = [pivot["value"]] if pivot and pivot["column"] == "process_name" else []
     default_hashes = [pivot["value"]] if pivot and pivot["column"] == "file_hash" else []
+    
+    # Apply timeline_filter from overview drill-down
+    default_sources = [timeline_filter["value"]] if timeline_filter and timeline_filter["type"] == "source_system" else []
+    default_event_types = [timeline_filter["value"]] if timeline_filter and timeline_filter["type"] == "event_type" else []
 
     col1, col2, col3 = st.columns(3)
-    selected_sources = col1.multiselect("Source System", sources, default=[])
-    selected_event_types = col2.multiselect("Event Type", event_types, default=[])
+    selected_sources = col1.multiselect("Source System", sources, default=default_sources)
+    selected_event_types = col2.multiselect("Event Type", event_types, default=default_event_types)
     selected_hosts = col3.multiselect("Host", hosts, default=default_hosts)
 
     col4, col5 = st.columns(2)
@@ -125,6 +137,40 @@ def page_timeline(case_id: str) -> None:
     else:
         st.warning("No events match the selected filters.")
 
+    # Gap Detection
+    with st.expander("⚠️ Coverage Gaps & Data Quality", expanded=False):
+        gap_bucket_mins = st.selectbox(
+            "Gap detection bucket size",
+            [30, 60, 120, 360, 1440],
+            index=1,
+            format_func=lambda x: f"{x} min" if x < 60 else f"{x//60} hour(s)" if x < 1440 else "1 day",
+        )
+        min_gap_buckets = st.slider("Minimum consecutive empty buckets", 1, 10, 2)
+        
+        bucket_df, gaps = detect_timeline_gaps(
+            case_id,
+            bucket_minutes=gap_bucket_mins,
+            min_gap_buckets=min_gap_buckets,
+        )
+        
+        if gaps:
+            st.warning(f"Found {len(gaps)} coverage gap(s)")
+            for gap in gaps:
+                severity_color = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(gap.severity, "⚪")
+                dur_str = str(gap.duration).split(".")[0]  # Remove microseconds
+                st.markdown(
+                    f"{severity_color} **{gap.start.strftime('%Y-%m-%d %H:%M')} → {gap.end.strftime('%Y-%m-%d %H:%M')}** "
+                    f"({dur_str}) | Expected ~{gap.expected_events} events | Sources active before: {', '.join(gap.affected_sources[:5]) or 'N/A'}"
+                )
+        else:
+            st.success("No significant coverage gaps detected.")
+        
+        # Source coverage table
+        st.markdown("#### Source Coverage")
+        coverage_df = get_source_coverage(case_id)
+        if not coverage_df.empty:
+            st.dataframe(coverage_df, use_container_width=True, height=200)
+
     st.markdown("#### Timeline Markers")
     marker_col1, marker_col2 = st.columns(2)
     new_marker_ts = marker_col1.text_input("Timestamp (ISO8601, e.g. 2024-07-01T12:00:00Z)")
@@ -147,6 +193,38 @@ def page_timeline(case_id: str) -> None:
             if mcol3.button("Delete", key=f"del_marker_{marker['marker_id']}"):
                 delete_timeline_marker(case_id, int(marker["marker_id"]))
                 st.rerun()
+
+    # Export filtered events
+    st.markdown("#### Export")
+    export_cols = st.columns([2, 1, 1])
+    with export_cols[0]:
+        export_limit = st.selectbox("Export limit", [100, 500, 1000, 5000, "All"], index=1)
+    
+    export_sql_limit = "" if export_limit == "All" else f"LIMIT {export_limit}"
+    export_df = query_df(
+        case_id,
+        f"""
+        SELECT
+          e.event_ts, e.source_system, e.event_type, e.host, e.user, e.src_ip, e.dest_ip,
+          e.process_name, e.outcome, e.severity, e.message,
+          e.source_event_id, e.raw_ref
+        FROM events e
+        WHERE {where_clause}
+        ORDER BY e.event_ts ASC
+        {export_sql_limit}
+        """,
+        tuple(params),
+    )
+    with export_cols[1]:
+        st.download_button(
+            "📥 Export CSV",
+            data=export_df.to_csv(index=False),
+            file_name=f"{case_id}_timeline_export.csv",
+            mime="text/csv",
+            key="export_csv",
+        )
+    with export_cols[2]:
+        st.caption(f"{len(export_df)} events")
 
     page_size = st.selectbox("Rows per page", [25, 50, 100], index=1)
     page = st.number_input("Page", min_value=1, value=1, step=1)

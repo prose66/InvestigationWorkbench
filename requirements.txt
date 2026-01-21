@@ -1,4 +1,15 @@
-altair
-pandas
-streamlit
-typer
+# Core dependencies
+altair>=5.0.0
+pandas>=2.0.0
+streamlit>=1.30.0
+typer>=0.9.0
+
+# Data export
+pyarrow>=14.0.0
+
+# Development and testing
+pytest>=7.4.0
+ruff>=0.1.0
+
+# CLI extras
+tqdm>=4.65.0

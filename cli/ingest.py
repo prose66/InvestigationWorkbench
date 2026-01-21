@@ -3,9 +3,10 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from cli.utils import compact_json, normalize_ts, sha256_text
+from cli.mappers import FieldMapper, GenericMapper, get_mapper
 
 REQUIRED_FIELDS = [
     "event_ts",
@@ -104,11 +105,50 @@ def iter_rows(path: Path) -> Iterator[Tuple[int, Dict[str, str]]]:
     return _parse_ndjson(path)
 
 
-def validate_row(row: Dict[str, str]) -> List[str]:
-    missing = [field for field in REQUIRED_FIELDS if field not in row]
+def validate_row(row: Dict[str, str], lenient: bool = False) -> List[str]:
+    """Validate a row has required fields.
+    
+    Args:
+        row: The row to validate
+        lenient: If True, only require event_ts and event_type
+        
+    Returns:
+        List of missing field names
+    """
+    if lenient:
+        # Lenient mode: only require timestamp and event type
+        required = ["event_ts", "event_type"]
+    else:
+        required = REQUIRED_FIELDS
+    missing = [field for field in required if not row.get(field)]
     if not row.get("source_system") and not row.get("source"):
         missing.append("source_system")
     return missing
+
+
+def map_and_validate(
+    row: Dict[str, Any],
+    source: str,
+    mapper: Optional[FieldMapper] = None,
+    lenient: bool = False,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Apply field mapping and validate the result.
+    
+    Args:
+        row: Raw row from source
+        source: Source system name (e.g., 'splunk', 'kusto')
+        mapper: Optional pre-configured mapper (auto-detected if None)
+        lenient: If True, only require event_ts and event_type
+        
+    Returns:
+        Tuple of (mapped_row, missing_fields)
+    """
+    if mapper is None:
+        mapper = get_mapper(source)
+    
+    mapped = mapper.map_row(row)
+    missing = validate_row(mapped, lenient=lenient)
+    return mapped, missing
 
 
 def event_fingerprint(row: Dict[str, str]) -> str:
@@ -134,10 +174,36 @@ def prepare_event(
     case_id: str,
     run_id: str,
     raw_ref: str,
-    row: Dict[str, str],
+    row: Dict[str, Any],
+    mapper: Optional[FieldMapper] = None,
+    source: Optional[str] = None,
+    lenient: bool = False,
 ) -> Tuple[Tuple, Dict[str, str]]:
+    """Prepare an event row for database insertion.
+    
+    Args:
+        case_id: Case identifier
+        run_id: Query run identifier
+        raw_ref: Reference to raw data location
+        row: Raw row data
+        mapper: Optional field mapper (auto-detected from source if None)
+        source: Source system name for mapper detection
+        lenient: If True, allow events with minimal required fields
+        
+    Returns:
+        Tuple of (event_tuple for DB insert, extras dict)
+        
+    Raises:
+        ValueError: If required fields are missing and lenient=False
+    """
+    # Apply field mapping if we have source info
+    if mapper is not None:
+        row = mapper.map_row(row)
+    elif source:
+        row = get_mapper(source).map_row(row)
+    
     normalized = {key: _normalize_value(value) for key, value in row.items()}
-    missing = validate_row(normalized)
+    missing = validate_row(normalized, lenient=lenient)
     if missing:
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 

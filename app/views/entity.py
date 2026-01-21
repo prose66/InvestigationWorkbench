@@ -236,6 +236,19 @@ def page_entity_page(case_id: str) -> None:
         if recent_df.empty:
             st.info("No events available for this entity.")
         else:
+            # Export button
+            export_cols = st.columns([3, 1])
+            with export_cols[0]:
+                st.caption(f"Showing {len(recent_df)} recent events")
+            with export_cols[1]:
+                st.download_button(
+                    "📥 Export CSV",
+                    data=recent_df.to_csv(index=False),
+                    file_name=f"{case_id}_{entity_type}_{entity_value}_events.csv",
+                    mime="text/csv",
+                    key="export_entity_events_csv",
+                )
+            
             st.dataframe(
                 recent_df[
                     [

@@ -28,3 +28,14 @@ def queue_entity_navigation(entity_type: str, entity_value: str) -> None:
 def queue_timeline_pivot(entity_type: str, entity_value: str) -> None:
     set_timeline_pivot(entity_type, entity_value)
     queue_page_navigation("Timeline Explorer")
+
+
+def queue_timeline_filter(filter_type: str, filter_value: str) -> None:
+    """Queue a filter for the Timeline Explorer.
+    
+    Args:
+        filter_type: Type of filter (source_system, event_type)
+        filter_value: Value to filter by
+    """
+    st.session_state["timeline_filter"] = {"type": filter_type, "value": filter_value}
+    queue_page_navigation("Timeline Explorer")

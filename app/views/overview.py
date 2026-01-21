@@ -4,6 +4,7 @@ import altair as alt
 import streamlit as st
 
 from services.db import query_df, query_one, time_bounds
+from state import queue_timeline_filter
 
 
 def page_case_overview(case_id: str) -> None:
@@ -31,19 +32,35 @@ def page_case_overview(case_id: str) -> None:
         return
 
     st.markdown("### Counts by Source System")
+    st.caption("Click a source to view in Timeline Explorer")
     source_df = query_df(
         case_id,
         "SELECT source_system, COUNT(*) AS count FROM events WHERE case_id = ? GROUP BY source_system",
         (case_id,),
     )
     if not source_df.empty:
+        # Create clickable buttons for each source
+        cols = st.columns(min(len(source_df), 4))
+        for i, (_, row) in enumerate(source_df.iterrows()):
+            with cols[i % 4]:
+                if st.button(
+                    f"📊 {row['source_system']}\n({row['count']:,} events)",
+                    key=f"source_{row['source_system']}",
+                    use_container_width=True,
+                ):
+                    queue_timeline_filter("source_system", row["source_system"])
+                    st.rerun()
+        
+        # Also show the chart
         chart = alt.Chart(source_df).mark_bar().encode(
             x=alt.X("source_system:N", title="Source System"),
             y=alt.Y("count:Q", title="Events"),
+            tooltip=["source_system:N", "count:Q"],
         )
         st.altair_chart(chart, use_container_width=True)
 
     st.markdown("### Counts by Event Type")
+    st.caption("Click an event type to view in Timeline Explorer")
     type_df = query_df(
         case_id,
         """
@@ -55,7 +72,23 @@ def page_case_overview(case_id: str) -> None:
         """,
         (case_id,),
     )
-    st.dataframe(type_df, use_container_width=True)
+    
+    if not type_df.empty:
+        # Show top event types as clickable buttons
+        top_types = type_df.head(8)
+        cols = st.columns(min(len(top_types), 4))
+        for i, (_, row) in enumerate(top_types.iterrows()):
+            with cols[i % 4]:
+                if st.button(
+                    f"🏷️ {row['event_type']}\n({row['count']:,})",
+                    key=f"type_{row['event_type']}",
+                    use_container_width=True,
+                ):
+                    queue_timeline_filter("event_type", row["event_type"])
+                    st.rerun()
+        
+        # Full table
+        st.dataframe(type_df, use_container_width=True)
 
     st.markdown("### Query Run Coverage")
     runs_df = query_df(

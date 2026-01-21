@@ -29,7 +29,16 @@ def page_bookmarks(case_id: str) -> None:
         st.info("No bookmarked events yet. Use the Timeline Explorer to bookmark events.")
         return
 
-    st.metric("Bookmarked Events", len(bookmarks_df))
+    col1, col2 = st.columns([3, 1])
+    col1.metric("Bookmarked Events", len(bookmarks_df))
+    col2.download_button(
+        "📥 Export CSV",
+        data=bookmarks_df.to_csv(index=False),
+        file_name=f"{case_id}_bookmarks.csv",
+        mime="text/csv",
+        key="export_bookmarks_csv",
+    )
+    
     st.dataframe(
         bookmarks_df[
             [
