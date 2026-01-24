@@ -1,4 +1,4 @@
-.PHONY: dev api install test lint format clean help
+.PHONY: dev api web install test lint format clean help
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
@@ -11,13 +11,19 @@ RUFF := $(VENV)/bin/ruff
 help:
 	@echo "Investigation Workbench - Development Commands"
 	@echo ""
-	@echo "  make install    Install dependencies in virtual environment"
+	@echo "  make install    Install Python dependencies in virtual environment"
+	@echo "  make install-web  Install React frontend dependencies"
 	@echo "  make dev        Start the Streamlit development server"
 	@echo "  make api        Start the FastAPI backend server"
+	@echo "  make web        Start the React frontend development server"
 	@echo "  make test       Run the test suite"
 	@echo "  make lint       Check code with ruff"
 	@echo "  make format     Format code with ruff"
 	@echo "  make clean      Remove build artifacts and caches"
+	@echo ""
+	@echo "For React frontend:"
+	@echo "  1. make api     (terminal 1 - backend on port 8000)"
+	@echo "  2. make web     (terminal 2 - frontend on port 3000)"
 	@echo ""
 
 install: $(VENV)/bin/activate
@@ -33,6 +39,12 @@ dev: $(VENV)/bin/activate
 
 api: $(VENV)/bin/activate
 	$(UVICORN) api.main:app --reload --host 0.0.0.0 --port 8000
+
+web:
+	cd web && npm run dev
+
+install-web:
+	cd web && npm install
 
 test: $(VENV)/bin/activate
 	$(PYTEST) tests/ -v
