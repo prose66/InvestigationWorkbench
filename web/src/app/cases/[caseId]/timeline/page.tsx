@@ -2,11 +2,30 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
+import {
+  Clock,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  X,
+  Eye,
+  Filter,
+  Zap,
+  Terminal,
+  ExternalLink,
+} from "lucide-react";
 import { useEvents } from "@/hooks/useEvents";
 import { usePivotStore, getPivotFilterParams } from "@/stores/pivotStore";
 import { usePivotContext } from "@/hooks/usePivotContext";
-import { SeverityBadge } from "@/components/common/SeverityBadge";
+import {
+  SeverityBadge,
+  getSeverityRowClass,
+} from "@/components/common/SeverityBadge";
+import { PivotChain } from "@/components/entity/PivotChain";
 import { formatDate, truncate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { Event } from "@/lib/types";
 
 export default function TimelinePage() {
@@ -33,14 +52,17 @@ export default function TimelinePage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyan border-t-transparent mb-3" />
+          <p className="text-muted-foreground text-sm">Loading events...</p>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="text-center py-12">
+      <div className="text-center py-12 metric-card">
         <h2 className="text-xl font-semibold text-destructive mb-2">Error</h2>
         <p className="text-muted-foreground">Failed to load events</p>
       </div>
@@ -48,125 +70,156 @@ export default function TimelinePage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">Timeline Explorer</h1>
-          <p className="text-muted-foreground text-sm">
-            {data?.total.toLocaleString() ?? 0} events
-          </p>
+    <div className="flex flex-col h-full space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-cyan/10 pulse-glow">
+            <Clock className="w-5 h-5 text-cyan" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">
+              Timeline Explorer
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              <span className="text-cyan font-semibold">
+                {data?.total.toLocaleString() ?? 0}
+              </span>{" "}
+              events
+              {pivotEntities.length > 0 && " (filtered)"}
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            className="px-3 py-2 border rounded-md bg-background text-sm"
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() =>
+              setSortBy(sortBy === "event_ts" ? "-event_ts" : "event_ts")
+            }
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 rounded-lg text-sm",
+              "bg-secondary border border-border",
+              "hover:border-cyan/30 transition-all duration-200"
+            )}
           >
-            <option value="event_ts">Oldest First</option>
-            <option value="-event_ts">Newest First</option>
-          </select>
+            <ArrowUpDown className="w-4 h-4" />
+            {sortBy === "event_ts" ? "Oldest First" : "Newest First"}
+          </button>
         </div>
       </div>
 
+      {/* Pivot Chain */}
+      <PivotChain />
+
       {/* Events Table */}
-      <div className="flex-1 overflow-auto border rounded-lg">
-        <table className="w-full text-sm">
-          <thead className="bg-muted sticky top-0">
-            <tr>
-              <th className="px-4 py-3 text-left">Time</th>
-              <th className="px-4 py-3 text-left">Source</th>
-              <th className="px-4 py-3 text-left">Type</th>
-              <th className="px-4 py-3 text-left">Host</th>
-              <th className="px-4 py-3 text-left">User</th>
-              <th className="px-4 py-3 text-left">Severity</th>
-              <th className="px-4 py-3 text-left">Message</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {data?.events.map((event) => (
-              <tr
-                key={event.event_pk}
-                className="hover:bg-muted/50 cursor-pointer"
-                onClick={() => setSelectedEvent(event)}
-              >
-                <td className="px-4 py-2 whitespace-nowrap">
-                  {formatDate(event.event_ts)}
-                </td>
-                <td className="px-4 py-2">{event.source_system}</td>
-                <td className="px-4 py-2">{event.event_type}</td>
-                <td className="px-4 py-2">
-                  {event.host && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        pivotToTimeline("host", event.host!);
-                      }}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {event.host}
-                    </button>
-                  )}
-                </td>
-                <td className="px-4 py-2">
-                  {event.user && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        pivotToTimeline("user", event.user!);
-                      }}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {event.user}
-                    </button>
-                  )}
-                </td>
-                <td className="px-4 py-2">
-                  <SeverityBadge severity={event.severity} />
-                </td>
-                <td className="px-4 py-2 max-w-xs truncate">
-                  {event.message}
-                </td>
+      <div className="flex-1 overflow-hidden rounded-xl border border-border glow-border-subtle">
+        <div className="overflow-auto h-full scan-lines">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Type</th>
+                <th>Host</th>
+                <th>User</th>
+                <th>Severity</th>
+                <th>Message</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data?.events.map((event, index) => (
+                <tr
+                  key={event.event_pk}
+                  className={cn(
+                    getSeverityRowClass(event.severity),
+                    "fade-in-up"
+                  )}
+                  style={{ animationDelay: `${Math.min(index, 10) * 20}ms` }}
+                  onClick={() => setSelectedEvent(event)}
+                >
+                  <td className="whitespace-nowrap font-mono text-xs">
+                    {formatDate(event.event_ts)}
+                  </td>
+                  <td>
+                    <span className="px-2 py-0.5 rounded bg-secondary text-xs font-medium">
+                      {event.source_system}
+                    </span>
+                  </td>
+                  <td className="text-muted-foreground">{event.event_type}</td>
+                  <td>
+                    {event.host && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          pivotToTimeline("host", event.host!);
+                        }}
+                        className="text-cyan hover:underline font-mono text-sm"
+                      >
+                        {event.host}
+                      </button>
+                    )}
+                  </td>
+                  <td>
+                    {event.user && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          pivotToTimeline("user", event.user!);
+                        }}
+                        className="text-cyan hover:underline font-mono text-sm"
+                      >
+                        {event.user}
+                      </button>
+                    )}
+                  </td>
+                  <td>
+                    <SeverityBadge severity={event.severity} showIcon={false} />
+                  </td>
+                  <td className="max-w-xs truncate text-muted-foreground">
+                    {event.message}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between mt-4">
+      <div className="flex items-center justify-between py-2">
         <div className="text-sm text-muted-foreground">
-          Page {data?.page ?? 1} of {data?.total_pages ?? 1}
+          Page{" "}
+          <span className="text-foreground font-medium">{data?.page ?? 1}</span>{" "}
+          of{" "}
+          <span className="text-foreground font-medium">
+            {data?.total_pages ?? 1}
+          </span>
         </div>
-        <div className="flex gap-2">
-          <button
+        <div className="flex gap-1">
+          <PaginationButton
             onClick={() => setPage(1)}
             disabled={page === 1}
-            className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-          >
-            First
-          </button>
-          <button
+            icon={ChevronsLeft}
+            label="First"
+          />
+          <PaginationButton
             onClick={() => setPage(page - 1)}
             disabled={page === 1}
-            className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-          >
-            Prev
-          </button>
-          <button
+            icon={ChevronLeft}
+            label="Previous"
+          />
+          <PaginationButton
             onClick={() => setPage(page + 1)}
             disabled={page >= (data?.total_pages ?? 1)}
-            className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-          >
-            Next
-          </button>
-          <button
+            icon={ChevronRight}
+            label="Next"
+          />
+          <PaginationButton
             onClick={() => setPage(data?.total_pages ?? 1)}
             disabled={page >= (data?.total_pages ?? 1)}
-            className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-          >
-            Last
-          </button>
+            icon={ChevronsRight}
+            label="Last"
+          />
         </div>
       </div>
 
@@ -189,6 +242,34 @@ export default function TimelinePage() {
   );
 }
 
+function PaginationButton({
+  onClick,
+  disabled,
+  icon: Icon,
+  label,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className={cn(
+        "p-2 rounded-lg border border-border",
+        "hover:border-cyan/30 hover:bg-secondary",
+        "disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:bg-transparent",
+        "transition-all duration-200"
+      )}
+    >
+      <Icon className="w-4 h-4" />
+    </button>
+  );
+}
+
 function EventDetailModal({
   event,
   onClose,
@@ -201,153 +282,183 @@ function EventDetailModal({
   onNavigate: (type: string, value: string) => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-card rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-auto m-4">
-        <div className="sticky top-0 bg-card border-b px-6 py-4 flex items-center justify-between">
-          <h2 className="font-semibold">Event Details</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            Close
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-content max-w-2xl w-full max-h-[85vh] overflow-hidden m-4 fade-in-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 rounded-lg bg-cyan/10">
+              <Eye className="w-4 h-4 text-cyan" />
+            </div>
+            <h2 className="font-semibold text-foreground">Event Details</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-5 overflow-auto max-h-[calc(85vh-60px)]">
           {/* Quick Pivots */}
           <div className="flex flex-wrap gap-2">
             {event.host && (
               <>
-                <button
+                <QuickPivotButton
+                  label={`+Filter: ${event.host}`}
                   onClick={() => onPivot("host", event.host!)}
-                  className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
-                >
-                  +Filter: {event.host}
-                </button>
-                <button
+                  variant="primary"
+                />
+                <QuickPivotButton
+                  label="View Host"
                   onClick={() => onNavigate("host", event.host!)}
-                  className="px-2 py-1 bg-gray-100 rounded text-xs"
-                >
-                  View Host
-                </button>
+                  variant="secondary"
+                />
               </>
             )}
             {event.user && (
               <>
-                <button
+                <QuickPivotButton
+                  label={`+Filter: ${event.user}`}
                   onClick={() => onPivot("user", event.user!)}
-                  className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
-                >
-                  +Filter: {event.user}
-                </button>
-                <button
+                  variant="primary"
+                />
+                <QuickPivotButton
+                  label="View User"
                   onClick={() => onNavigate("user", event.user!)}
-                  className="px-2 py-1 bg-gray-100 rounded text-xs"
-                >
-                  View User
-                </button>
+                  variant="secondary"
+                />
               </>
             )}
             {event.src_ip && (
-              <button
+              <QuickPivotButton
+                label={`+Filter: ${event.src_ip}`}
                 onClick={() => onPivot("ip", event.src_ip!)}
-                className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
-              >
-                +Filter: {event.src_ip}
-              </button>
+                variant="primary"
+              />
             )}
           </div>
 
-          {/* Event Info */}
-          <dl className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <dt className="text-muted-foreground">Time</dt>
-              <dd>{formatDate(event.event_ts)}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Source System</dt>
-              <dd>{event.source_system}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Event Type</dt>
-              <dd>{event.event_type}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Severity</dt>
-              <dd>
-                <SeverityBadge severity={event.severity} />
-              </dd>
-            </div>
-            {event.host && (
-              <div>
-                <dt className="text-muted-foreground">Host</dt>
-                <dd>{event.host}</dd>
-              </div>
-            )}
-            {event.user && (
-              <div>
-                <dt className="text-muted-foreground">User</dt>
-                <dd>{event.user}</dd>
-              </div>
-            )}
+          {/* Event Info Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <InfoField label="Time" value={formatDate(event.event_ts)} mono />
+            <InfoField label="Source System" value={event.source_system} />
+            <InfoField label="Event Type" value={event.event_type} />
+            <InfoField
+              label="Severity"
+              value={<SeverityBadge severity={event.severity} />}
+            />
+            {event.host && <InfoField label="Host" value={event.host} mono />}
+            {event.user && <InfoField label="User" value={event.user} mono />}
             {event.src_ip && (
-              <div>
-                <dt className="text-muted-foreground">Source IP</dt>
-                <dd>{event.src_ip}</dd>
-              </div>
+              <InfoField label="Source IP" value={event.src_ip} mono />
             )}
             {event.dest_ip && (
-              <div>
-                <dt className="text-muted-foreground">Dest IP</dt>
-                <dd>{event.dest_ip}</dd>
-              </div>
+              <InfoField label="Dest IP" value={event.dest_ip} mono />
             )}
             {event.process_name && (
-              <div>
-                <dt className="text-muted-foreground">Process</dt>
-                <dd>{event.process_name}</dd>
-              </div>
+              <InfoField label="Process" value={event.process_name} mono />
             )}
             {event.tactic && (
-              <div>
-                <dt className="text-muted-foreground">MITRE Tactic</dt>
-                <dd>{event.tactic}</dd>
-              </div>
+              <InfoField label="MITRE Tactic" value={event.tactic} />
             )}
             {event.technique && (
-              <div>
-                <dt className="text-muted-foreground">MITRE Technique</dt>
-                <dd>{event.technique}</dd>
-              </div>
+              <InfoField label="MITRE Technique" value={event.technique} />
             )}
-          </dl>
+          </div>
 
           {/* Message */}
           {event.message && (
             <div>
-              <dt className="text-muted-foreground text-sm mb-1">Message</dt>
-              <dd className="bg-muted p-3 rounded text-sm">{event.message}</dd>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-2">
+                Message
+              </p>
+              <div className="bg-secondary/50 border border-border rounded-lg p-4 text-sm">
+                {event.message}
+              </div>
             </div>
           )}
 
           {/* Process Details */}
           {event.process_cmdline && (
             <div>
-              <dt className="text-muted-foreground text-sm mb-1">Command Line</dt>
-              <dd className="bg-muted p-3 rounded text-sm font-mono break-all">
+              <div className="flex items-center gap-2 mb-2">
+                <Terminal className="w-3 h-3 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
+                  Command Line
+                </p>
+              </div>
+              <pre className="bg-background border border-border rounded-lg p-4 text-sm font-mono break-all whitespace-pre-wrap overflow-x-auto">
                 {event.process_cmdline}
-              </dd>
+              </pre>
             </div>
           )}
 
           {/* Raw JSON */}
           {event.raw_json && (
             <div>
-              <dt className="text-muted-foreground text-sm mb-1">Raw JSON</dt>
-              <pre className="bg-muted p-3 rounded text-xs overflow-auto max-h-64">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-2">
+                Raw JSON
+              </p>
+              <pre className="bg-background border border-border rounded-lg p-4 text-xs font-mono overflow-auto max-h-48">
                 {JSON.stringify(event.raw_json, null, 2)}
               </pre>
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function QuickPivotButton({
+  label,
+  onClick,
+  variant,
+}: {
+  label: string;
+  onClick: () => void;
+  variant: "primary" | "secondary";
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium",
+        "transition-all duration-200",
+        variant === "primary"
+          ? "bg-cyan/15 text-cyan border border-cyan/30 hover:bg-cyan/25"
+          : "bg-secondary text-muted-foreground border border-border hover:text-foreground hover:border-cyan/30"
+      )}
+    >
+      {variant === "primary" && <Filter className="w-3 h-3" />}
+      {variant === "secondary" && <ExternalLink className="w-3 h-3" />}
+      {label}
+    </button>
+  );
+}
+
+function InfoField({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-1">
+        {label}
+      </p>
+      <p className={cn("text-sm text-foreground", mono && "font-mono")}>
+        {value}
+      </p>
     </div>
   );
 }
