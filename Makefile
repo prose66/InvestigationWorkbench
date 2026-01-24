@@ -1,9 +1,10 @@
-.PHONY: dev install test lint format clean help
+.PHONY: dev api install test lint format clean help
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 STREAMLIT := $(VENV)/bin/streamlit
+UVICORN := $(VENV)/bin/uvicorn
 PYTEST := $(VENV)/bin/pytest
 RUFF := $(VENV)/bin/ruff
 
@@ -12,6 +13,7 @@ help:
 	@echo ""
 	@echo "  make install    Install dependencies in virtual environment"
 	@echo "  make dev        Start the Streamlit development server"
+	@echo "  make api        Start the FastAPI backend server"
 	@echo "  make test       Run the test suite"
 	@echo "  make lint       Check code with ruff"
 	@echo "  make format     Format code with ruff"
@@ -28,6 +30,9 @@ $(VENV)/bin/activate:
 
 dev: $(VENV)/bin/activate
 	$(STREAMLIT) run app/main.py
+
+api: $(VENV)/bin/activate
+	$(UVICORN) api.main:app --reload --host 0.0.0.0 --port 8000
 
 test: $(VENV)/bin/activate
 	$(PYTEST) tests/ -v
