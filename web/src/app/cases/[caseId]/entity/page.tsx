@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Users,
   Calendar,
@@ -18,6 +19,7 @@ import { EntitySelector } from "@/components/entity/EntitySelector";
 import { PivotChain } from "@/components/entity/PivotChain";
 import { useEntitySummary, useEntityRelationships } from "@/hooks/useEntities";
 import { usePivotContext } from "@/hooks/usePivotContext";
+import { usePivotStore, createPivotEntity } from "@/stores/pivotStore";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +33,7 @@ const entityIcons = {
 export default function EntityPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const caseId = params.caseId as string;
 
   const entityType = searchParams.get("type");
@@ -38,6 +41,8 @@ export default function EntityPage() {
 
   const { pivotToTimeline, pivotToTimelineSingle, navigateToEntity } =
     usePivotContext();
+
+  const { clearPivotEntities, addPivotEntity } = usePivotStore();
 
   const { data: summary, isLoading: loadingSummary } = useEntitySummary(
     caseId,
@@ -47,6 +52,23 @@ export default function EntityPage() {
 
   const { data: relationships, isLoading: loadingRelationships } =
     useEntityRelationships(caseId, entityType, entityValue);
+
+  // Pivot to timeline with BOTH current entity AND related entity (intersection)
+  const pivotWithCurrentEntity = (relatedType: string, relatedValue: string) => {
+    // Clear existing pivots and add both entities for intersection
+    clearPivotEntities();
+
+    // Add current entity first
+    if (entityType && entityValue) {
+      addPivotEntity(createPivotEntity(entityType, entityValue));
+    }
+
+    // Add the related entity
+    addPivotEntity(createPivotEntity(relatedType, relatedValue));
+
+    // Navigate to timeline
+    router.push(`/cases/${caseId}/timeline`);
+  };
 
   return (
     <div className="space-y-6">
@@ -172,6 +194,7 @@ export default function EntityPage() {
                 <span className="text-cyan font-mono">
                   {entityType}={entityValue}
                 </span>
+                . Click entity name or "+Filter" to see intersection.
               </p>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -180,7 +203,9 @@ export default function EntityPage() {
                     title="Hosts"
                     icon={Server}
                     entities={relationships.related_hosts}
-                    onPivot={(value) => pivotToTimeline("host", value)}
+                    currentEntityType={entityType}
+                    currentEntityValue={entityValue}
+                    onPivotIntersection={(value) => pivotWithCurrentEntity("host", value)}
                     onPivotSingle={(value) =>
                       pivotToTimelineSingle("host", value)
                     }
@@ -192,7 +217,9 @@ export default function EntityPage() {
                     title="Users"
                     icon={User}
                     entities={relationships.related_users}
-                    onPivot={(value) => pivotToTimeline("user", value)}
+                    currentEntityType={entityType}
+                    currentEntityValue={entityValue}
+                    onPivotIntersection={(value) => pivotWithCurrentEntity("user", value)}
                     onPivotSingle={(value) =>
                       pivotToTimelineSingle("user", value)
                     }
@@ -204,7 +231,9 @@ export default function EntityPage() {
                     title="IPs"
                     icon={Globe}
                     entities={relationships.related_ips}
-                    onPivot={(value) => pivotToTimeline("ip", value)}
+                    currentEntityType={entityType}
+                    currentEntityValue={entityValue}
+                    onPivotIntersection={(value) => pivotWithCurrentEntity("ip", value)}
                     onPivotSingle={(value) =>
                       pivotToTimelineSingle("ip", value)
                     }
@@ -216,7 +245,9 @@ export default function EntityPage() {
                     title="Processes"
                     icon={Cpu}
                     entities={relationships.related_processes}
-                    onPivot={(value) => pivotToTimeline("process", value)}
+                    currentEntityType={entityType}
+                    currentEntityValue={entityValue}
+                    onPivotIntersection={(value) => pivotWithCurrentEntity("process", value)}
                     onPivotSingle={(value) =>
                       pivotToTimelineSingle("process", value)
                     }
@@ -267,7 +298,9 @@ function RelatedEntityList({
   title,
   icon: Icon,
   entities,
-  onPivot,
+  currentEntityType,
+  currentEntityValue,
+  onPivotIntersection,
   onPivotSingle,
   onNavigate,
 }: {
@@ -280,7 +313,9 @@ function RelatedEntityList({
     first_seen: string;
     last_seen: string;
   }>;
-  onPivot: (value: string) => void;
+  currentEntityType: string;
+  currentEntityValue: string;
+  onPivotIntersection: (value: string) => void;
   onPivotSingle: (value: string) => void;
   onNavigate: (value: string) => void;
 }) {
@@ -307,25 +342,26 @@ function RelatedEntityList({
             style={{ animationDelay: `${index * 30}ms` }}
           >
             <button
-              onClick={() => onNavigate(entity.entity_value)}
+              onClick={() => onPivotIntersection(entity.entity_value)}
               className="text-cyan hover:underline font-mono text-sm truncate max-w-[180px]"
+              title={`View events where ${currentEntityType}=${currentEntityValue} AND ${entity.entity_type}=${entity.entity_value}`}
             >
               {entity.entity_value}
             </button>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
-                {entity.count.toLocaleString()} events
+                {entity.count.toLocaleString()} shared
               </span>
               <button
-                onClick={() => onPivot(entity.entity_value)}
+                onClick={() => onPivotIntersection(entity.entity_value)}
                 className={cn(
                   "px-2 py-1 rounded text-xs font-medium",
                   "bg-cyan/10 text-cyan border border-cyan/20",
                   "hover:bg-cyan/20 transition-colors"
                 )}
-                title="Add to pivot filters (intersection)"
+                title={`Filter: ${currentEntityType}=${currentEntityValue} AND ${entity.entity_type}=${entity.entity_value}`}
               >
-                +Filter
+                +Both
               </button>
               <button
                 onClick={() => onPivotSingle(entity.entity_value)}
@@ -334,9 +370,20 @@ function RelatedEntityList({
                   "bg-secondary text-muted-foreground border border-border",
                   "hover:text-foreground hover:border-cyan/30 transition-colors"
                 )}
-                title="View all events for this entity"
+                title={`View ALL events for ${entity.entity_value} only`}
               >
-                View All
+                Only
+              </button>
+              <button
+                onClick={() => onNavigate(entity.entity_value)}
+                className={cn(
+                  "p-1 rounded text-xs",
+                  "bg-secondary text-muted-foreground border border-border",
+                  "hover:text-foreground hover:border-cyan/30 transition-colors"
+                )}
+                title={`View entity details for ${entity.entity_value}`}
+              >
+                <Eye className="w-3.5 h-3.5" />
               </button>
             </div>
           </li>
