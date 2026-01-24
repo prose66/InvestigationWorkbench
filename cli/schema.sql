@@ -188,3 +188,17 @@ CREATE TABLE IF NOT EXISTS timeline_markers (
 
 CREATE INDEX IF NOT EXISTS idx_timeline_markers_case_ts
   ON timeline_markers(case_id, marker_ts);
+
+-- Saved filter templates for quick access
+CREATE TABLE IF NOT EXISTS filter_templates (
+  template_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  page TEXT NOT NULL DEFAULT 'timeline',
+  filters_json TEXT NOT NULL,
+  created_at TEXT,
+  FOREIGN KEY (case_id) REFERENCES cases(case_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_filter_templates_name
+  ON filter_templates(case_id, page, name);

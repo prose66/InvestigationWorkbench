@@ -4,9 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 .DS_Store
-cases/
-!cases/demo/
-!cases/demo/**
+/cases/
+!/cases/demo/
+!/cases/demo/**
 streamlit.log
 *.sqlite
 .env

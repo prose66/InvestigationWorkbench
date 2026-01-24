@@ -1,9 +1,101 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import streamlit as st
+
+
+@dataclass
+class FilterPreset:
+    """A predefined filter configuration."""
+    name: str
+    description: str
+    filters: Dict[str, Any]
+
+
+# Quick filter presets for common investigation patterns
+FILTER_PRESETS: List[FilterPreset] = [
+    FilterPreset(
+        name="Failed/Denied Only",
+        description="Events with failure or denied outcomes",
+        filters={"outcome_contains": ["fail", "denied", "error", "reject"]},
+    ),
+    FilterPreset(
+        name="High Severity",
+        description="High and critical severity events",
+        filters={"severity_in": ["high", "critical"]},
+    ),
+    FilterPreset(
+        name="Process Activity",
+        description="Process creation and execution events",
+        filters={"event_type_contains": ["process", "execution", "spawn"]},
+    ),
+    FilterPreset(
+        name="Network Activity",
+        description="Network connection and DNS events",
+        filters={"event_type_contains": ["network", "connection", "dns", "firewall"]},
+    ),
+    FilterPreset(
+        name="Authentication",
+        description="Login and authentication events",
+        filters={"event_type_contains": ["auth", "login", "logon", "session"]},
+    ),
+    FilterPreset(
+        name="Registry Changes",
+        description="Registry modification events",
+        filters={"event_type_contains": ["registry"]},
+    ),
+]
+
+
+def get_preset_names() -> List[str]:
+    """Get list of preset names for dropdown."""
+    return ["Custom..."] + [p.name for p in FILTER_PRESETS]
+
+
+def get_preset_by_name(name: str) -> Optional[FilterPreset]:
+    """Get a preset by name."""
+    for p in FILTER_PRESETS:
+        if p.name == name:
+            return p
+    return None
+
+
+def apply_preset_to_query(
+    preset: FilterPreset,
+    base_where: str,
+    params: List,
+) -> Tuple[str, List]:
+    """Apply preset filters to a query."""
+    clauses = [base_where]
+
+    if "outcome_contains" in preset.filters:
+        patterns = preset.filters["outcome_contains"]
+        or_clauses = []
+        for pattern in patterns:
+            or_clauses.append("LOWER(e.outcome) LIKE ?")
+            params.append(f"%{pattern}%")
+        if or_clauses:
+            clauses.append(f"({' OR '.join(or_clauses)})")
+
+    if "severity_in" in preset.filters:
+        severities = preset.filters["severity_in"]
+        placeholders = ", ".join(["?"] * len(severities))
+        clauses.append(f"LOWER(e.severity) IN ({placeholders})")
+        params.extend([s.lower() for s in severities])
+
+    if "event_type_contains" in preset.filters:
+        patterns = preset.filters["event_type_contains"]
+        or_clauses = []
+        for pattern in patterns:
+            or_clauses.append("LOWER(e.event_type) LIKE ?")
+            params.append(f"%{pattern}%")
+        if or_clauses:
+            clauses.append(f"({' OR '.join(or_clauses)})")
+
+    return " AND ".join(clauses), params
 
 
 def build_filters(
