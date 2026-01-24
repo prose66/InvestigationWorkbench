@@ -10,7 +10,12 @@ import streamlit as st
 from services.db import distinct_values, query_df, time_bounds
 from services.filters import build_filters, time_range_selector
 from services.entities import RELATED_ENTITY_MAP
-from state import queue_entity_navigation
+from state import (
+    queue_entity_navigation,
+    queue_timeline_pivot,
+    get_filter_state,
+    save_filter_state,
+)
 
 
 def swimlane_bucket_size(start_dt: datetime, end_dt: datetime) -> tuple[str, timedelta]:
@@ -40,6 +45,9 @@ def page_swimlane_timeline(case_id: str) -> None:
         st.info("No events ingested yet.")
         return
 
+    # Load persisted filter state
+    saved_filters = get_filter_state(case_id, "swimlane")
+
     with st.sidebar:
         st.markdown("### Swimlane Controls")
         start_dt, end_dt = time_range_selector(min_ts, max_ts)
@@ -53,10 +61,34 @@ def page_swimlane_timeline(case_id: str) -> None:
         event_types = distinct_values(case_id, "event_type")
         hosts = distinct_values(case_id, "host")
         users = distinct_values(case_id, "user")
-        selected_sources = st.multiselect("Source System", sources, default=[])
-        selected_event_types = st.multiselect("Event Type", event_types, default=[])
-        selected_hosts = st.multiselect("Host", hosts, default=[])
-        selected_users = st.multiselect("User", users, default=[])
+        selected_sources = st.multiselect(
+            "Source System", sources,
+            default=saved_filters.get("sources", []),
+            key="sl_sources",
+        )
+        selected_event_types = st.multiselect(
+            "Event Type", event_types,
+            default=saved_filters.get("event_types", []),
+            key="sl_event_types",
+        )
+        selected_hosts = st.multiselect(
+            "Host", hosts,
+            default=saved_filters.get("hosts", []),
+            key="sl_hosts",
+        )
+        selected_users = st.multiselect(
+            "User", users,
+            default=saved_filters.get("users", []),
+            key="sl_users",
+        )
+
+        # Save filter state
+        save_filter_state(case_id, "swimlane", {
+            "sources": selected_sources,
+            "event_types": selected_event_types,
+            "hosts": selected_hosts,
+            "users": selected_users,
+        })
 
     where_clause, params = build_filters(
         case_id,
@@ -207,12 +239,16 @@ def page_swimlane_timeline(case_id: str) -> None:
     if lane_dim in ("host", "user"):
         st.markdown("#### Pivot Lanes")
         for lane_value in lanes:
-            col1, col2 = st.columns([3, 1])
+            col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
                 st.write(lane_value)
             with col2:
-                if st.button("Open Entity", key=f"lane-entity-{lane_value}"):
+                if st.button("Entity", key=f"lane-entity-{lane_value}"):
                     queue_entity_navigation(lane_dim, lane_value)
+                    st.rerun()
+            with col3:
+                if st.button("Timeline", key=f"lane-timeline-{lane_value}"):
+                    queue_timeline_pivot(lane_dim, lane_value)
                     st.rerun()
 
     st.markdown("#### Events in View")

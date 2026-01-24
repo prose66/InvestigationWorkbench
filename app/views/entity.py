@@ -17,7 +17,13 @@ from services.entities import (
     load_case_event_type_counts,
 )
 from services.scoring import score_event
-from state import queue_entity_navigation, queue_timeline_pivot
+from state import (
+    queue_entity_navigation,
+    queue_timeline_pivot,
+    queue_timeline_pivot_single,
+    add_pivot_entity,
+    get_pivot_entities,
+)
 
 
 def render_related_entities(
@@ -27,6 +33,8 @@ def render_related_entities(
     target_type: str,
     base_where: str,
     base_params: List[str],
+    current_entity_type: str = None,
+    current_entity_value: str = None,
     limit: int = 15,
 ) -> None:
     related_df = query_df(
@@ -53,12 +61,16 @@ def render_related_entities(
         st.caption("No related entities found.")
         return
 
+    # Show current context info if we have one
+    if current_entity_type and current_entity_value:
+        st.caption(f"Related to: {current_entity_type}={current_entity_value}")
+
     for _, row in related_df.iterrows():
         value = row["value"]
         count = int(row["count"])
         first_seen = row["first_seen"]
         last_seen = row["last_seen"]
-        col1, col2, col3 = st.columns([3, 1, 2])
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 2])
         with col1:
             st.button(
                 f"{value} ({count})",
@@ -67,50 +79,121 @@ def render_related_entities(
                 args=(target_type, value),
             )
         with col2:
+            # Add to Filters - preserves current entity context (intersection)
             st.button(
-                "Pivot",
-                key=f"pivot-{title}-{value}",
+                "+Filter",
+                key=f"pivot-add-{title}-{value}",
                 on_click=queue_timeline_pivot,
                 args=(target_type, value),
+                help=f"Add {target_type}={value} to pivot filters (shows intersection)",
             )
         with col3:
-            st.caption(f"{first_seen} -> {last_seen}")
+            # View All - replaces pivot filters to show all events for this entity
+            st.button(
+                "View All",
+                key=f"pivot-only-{title}-{value}",
+                on_click=queue_timeline_pivot_single,
+                args=(target_type, value),
+                help=f"View all events for {target_type}={value}",
+            )
+        with col4:
+            st.caption(f"{first_seen[:10]} -> {last_seen[:10]}")
 
 
 def page_entity_page(case_id: str) -> None:
     st.subheader("Entity Page")
-    with st.sidebar:
-        st.markdown("### Entity")
-        entity_type = st.selectbox("Entity Type", ENTITY_TYPES, key="entity_type_input")
-        entity_value = st.text_input("Entity Value", key="entity_value_input").strip()
-        entity_list = entity_options(case_id, entity_type)
-        entity_select = st.selectbox(
-            "Select from ingested entities",
-            [""] + entity_list,
-            key="entity_value_select",
+
+    # --- MAIN AREA: Entity Selector ---
+    active_entity = st.session_state.get("active_entity")
+
+    # Entity search/select UI in main area
+    st.markdown("#### Select Entity")
+    selector_col1, selector_col2 = st.columns([1, 3])
+
+    with selector_col1:
+        entity_type = st.selectbox(
+            "Entity Type",
+            ENTITY_TYPES,
+            key="entity_type_input",
+            index=ENTITY_TYPES.index(active_entity["type"]) if active_entity and active_entity.get("type") in ENTITY_TYPES else 0,
         )
-        if entity_select:
-            entity_value = entity_select
-        open_entity = st.button("Open Entity")
-        pivot_to_timeline = st.button("Pivot to Timeline")
+
+    with selector_col2:
+        entity_list = entity_options(case_id, entity_type)
+        # Search/autocomplete in main area
+        search_col1, search_col2 = st.columns([4, 1])
+        with search_col1:
+            current_value = active_entity.get("value", "") if active_entity and active_entity.get("type") == entity_type else ""
+            # Use selectbox with search capability
+            entity_select = st.selectbox(
+                f"Select {entity_type}",
+                [""] + entity_list,
+                index=(entity_list.index(current_value) + 1) if current_value in entity_list else 0,
+                key="entity_value_select",
+                placeholder=f"Search {entity_type}s...",
+            )
+        with search_col2:
+            # Manual entry option
+            manual_value = st.text_input(
+                "Or enter value",
+                key="entity_value_input",
+                placeholder="Custom...",
+            ).strip()
+
+    # Determine the selected entity value
+    entity_value = manual_value if manual_value else entity_select
+
+    # Action buttons in main area
+    action_col1, action_col2, action_col3 = st.columns([1, 1, 3])
+    with action_col1:
+        open_entity = st.button("View Entity", type="primary", disabled=not entity_value)
+    with action_col2:
+        pivot_to_timeline = st.button("Pivot to Timeline", disabled=not entity_value)
+
+    # Show recent entities for quick access
+    if not active_entity:
+        recent_key = f"recent_entities:{case_id}"
+        recent_entities = st.session_state.get(recent_key, [])
+        if recent_entities:
+            st.markdown("**Recent:**")
+            recent_cols = st.columns(min(len(recent_entities), 5))
+            for idx, recent in enumerate(recent_entities[:5]):
+                with recent_cols[idx]:
+                    if st.button(
+                        f"{recent['value'][:12]}",
+                        key=f"recent_{idx}",
+                        help=f"{recent['type']}: {recent['value']}",
+                    ):
+                        st.session_state["active_entity"] = recent
+                        st.rerun()
 
     if open_entity and entity_value:
         st.session_state["active_entity"] = {"type": entity_type, "value": entity_value}
+        # Track recent entities
+        recent_key = f"recent_entities:{case_id}"
+        recent_entities = st.session_state.get(recent_key, [])
+        new_recent = {"type": entity_type, "value": entity_value}
+        recent_entities = [r for r in recent_entities if r != new_recent]  # Remove duplicates
+        recent_entities.insert(0, new_recent)
+        st.session_state[recent_key] = recent_entities[:10]
+        st.rerun()
 
-    active_entity = st.session_state.get("active_entity")
     if not active_entity and entity_value:
         active_entity = {"type": entity_type, "value": entity_value}
 
     if pivot_to_timeline and entity_value:
         queue_timeline_pivot(entity_type, entity_value)
+        st.rerun()
 
     if not active_entity or not active_entity.get("value"):
-        st.info("Enter an entity value and click Open Entity.")
+        st.info("Select an entity above to view details.")
         return
+
+    st.markdown("---")
 
     entity_type = active_entity["type"]
     entity_value = active_entity["value"]
-    st.markdown(f"**Entity:** `{entity_type}` = `{entity_value}`")
+    st.markdown(f"### {entity_type}: `{entity_value}`")
 
     entity_clause, entity_params = entity_where_clause(entity_type, entity_value)
     base_where = f"e.case_id = ? AND {entity_clause}"
@@ -216,6 +299,8 @@ def page_entity_page(case_id: str) -> None:
                 target_type,
                 base_where,
                 base_params,
+                current_entity_type=entity_type,
+                current_entity_value=entity_value,
             )
 
     with tabs[2]:
@@ -242,7 +327,7 @@ def page_entity_page(case_id: str) -> None:
                 st.caption(f"Showing {len(recent_df)} recent events")
             with export_cols[1]:
                 st.download_button(
-                    "📥 Export CSV",
+                    "Export CSV",
                     data=recent_df.to_csv(index=False),
                     file_name=f"{case_id}_{entity_type}_{entity_value}_events.csv",
                     mime="text/csv",
