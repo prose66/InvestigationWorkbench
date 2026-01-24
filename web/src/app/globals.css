@@ -216,7 +216,12 @@
   .input-dark {
     @apply w-full px-3 py-2 rounded-md text-sm transition-all duration-200;
     @apply bg-input border border-border text-foreground;
-    @apply focus:outline-none focus:ring-2 focus:ring-cyan/30 focus:border-cyan/50;
+    @apply focus:outline-none focus:ring-2;
+  }
+
+  .input-dark:focus {
+    --tw-ring-color: hsl(var(--cyan) / 0.3);
+    border-color: hsl(var(--cyan) / 0.5);
   }
 
   .input-dark::placeholder {
