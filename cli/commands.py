@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from cli import ingest as ingest_lib
 from cli.db import connect, init_db
@@ -20,15 +20,44 @@ SCHEMA_PATH = ROOT_DIR / "cli" / "schema.sql"
 
 @dataclass
 class IngestResult:
-    """Result of an ingestion run."""
+    """Result of an ingestion run with enhanced feedback."""
     run_id: str
     events_ingested: int
     events_skipped: int
+    source: str = ""
+    mapper_type: str = "generic"  # "yaml_case", "yaml_builtin", "builtin", "generic"
+    fields_mapped: Dict[str, str] = field(default_factory=dict)
+    fields_unmapped: List[str] = field(default_factory=list)
     errors: List[dict] = field(default_factory=list)
-    
+    suggestions: List[str] = field(default_factory=list)
+
     @property
     def success(self) -> bool:
         return self.events_ingested > 0 or self.events_skipped == 0
+
+    def generate_suggestions(self, case_id: str):
+        """Generate helpful suggestions based on errors."""
+        if not self.errors:
+            return
+
+        first_error = self.errors[0].get("error", "") if self.errors else ""
+
+        if "event_ts" in first_error or "Missing required fields" in first_error:
+            self.suggestions.append(
+                f"Create cases/{case_id}/mappers/{self.source}.yaml to map your timestamp field to event_ts"
+            )
+
+        if len(self.fields_unmapped) > 5:
+            self.suggestions.append(
+                f"Many unmapped fields ({len(self.fields_unmapped)}) went to extras_json. "
+                f"Consider creating a custom mapper for better field mapping."
+            )
+
+        if self.mapper_type == "generic" and self.events_skipped > 0:
+            self.suggestions.append(
+                f"Using generic mapper. Create a YAML config for source '{self.source}' "
+                f"to improve field mapping."
+            )
 
 
 def case_paths(case_id: str) -> dict:
@@ -144,22 +173,20 @@ def ingest_run(
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> IngestResult:
     """Ingest events from a query run into the database.
-    
+
     Args:
         case_id: Case identifier
         run_id: Query run identifier
         skip_errors: If True, skip malformed rows instead of aborting
         lenient: If True, only require event_ts and event_type
         progress_callback: Optional callback(processed, total) for progress updates
-        
+
     Returns:
-        IngestResult with counts and any errors
+        IngestResult with counts, errors, and mapping feedback
     """
     paths = case_paths(case_id)
     if not paths["db_path"].exists():
         raise FileNotFoundError(f"Case not initialized: {paths['db_path']}")
-
-    result = IngestResult(run_id=run_id, events_ingested=0, events_skipped=0)
 
     with connect(paths["db_path"]) as conn:
         conn.row_factory = sqlite3.Row
@@ -171,9 +198,18 @@ def ingest_run(
             raise ValueError(f"Unknown run_id: {run_id}")
         raw_path = paths["case_dir"] / run["raw_path"]
         source_system = run["source_system"]
-        
-        # Get appropriate mapper for this source
-        mapper = get_mapper(source_system)
+
+        # Get appropriate mapper for this source (with case-specific config support)
+        mapper, mapper_type = get_mapper(source_system, paths["case_dir"])
+
+        # Initialize result with enhanced feedback
+        result = IngestResult(
+            run_id=run_id,
+            events_ingested=0,
+            events_skipped=0,
+            source=source_system,
+            mapper_type=mapper_type,
+        )
 
         insert_sql = """
             INSERT OR IGNORE INTO events(
@@ -204,10 +240,31 @@ def ingest_run(
         )
         
         processed = 0
+        first_row = True
         for line_no, row in ingest_lib.iter_rows(raw_path):
             raw_ref = f"{run['raw_path']}#L{line_no}"
             processed += 1
-            
+
+            # Track field mapping stats on first row
+            if first_row:
+                source_keys_lower = {k.lower() for k in row.keys()}
+
+                # Which source fields matched mapper definitions
+                result.fields_mapped = {
+                    src: mapper.field_map[src]
+                    for src in mapper.field_map
+                    if src.lower() in source_keys_lower
+                }
+
+                # Which source fields had no mapping (will go to extras_json)
+                mapped_source_fields = {k.lower() for k in mapper.field_map.keys()}
+                result.fields_unmapped = [
+                    k for k in row.keys()
+                    if k.lower() not in mapped_source_fields
+                    and k.lower() not in ingest_lib.KNOWN_FIELDS
+                ]
+                first_row = False
+
             try:
                 event, extras = ingest_lib.prepare_event(
                     case_id, run_id, raw_ref, row,
@@ -224,6 +281,7 @@ def ingest_run(
                         "line": line_no,
                         "error": str(exc),
                         "raw_ref": raw_ref,
+                        "sample": {k: v for k, v in list(row.items())[:5]},
                     })
                     continue
                 else:
@@ -281,6 +339,9 @@ def ingest_run(
             with error_path.open("w", encoding="utf-8") as f:
                 for err in result.errors:
                     f.write(json.dumps(err) + "\n")
+
+    # Generate helpful suggestions
+    result.generate_suggestions(case_id)
 
     return result
 
@@ -354,3 +415,173 @@ def export_timeline(case_id: str, fmt: str, output_path: Optional[Path]) -> Path
     else:
         df.to_csv(output_path, index=False)
     return output_path
+
+
+def print_ingest_report(result: IngestResult, verbose: bool = False) -> List[str]:
+    """Format an IngestResult for CLI output.
+
+    Args:
+        result: The IngestResult to format
+        verbose: If True, show more detail
+
+    Returns:
+        List of formatted output lines
+    """
+    lines = []
+    source_label = f"{result.source} ({result.mapper_type})"
+    lines.append(f"\nIngesting {source_label}")
+
+    if result.fields_mapped:
+        mapped_str = ", ".join(
+            f"{k}->{v}" for k, v in list(result.fields_mapped.items())[:8]
+        )
+        if len(result.fields_mapped) > 8:
+            mapped_str += f" (+{len(result.fields_mapped) - 8} more)"
+        lines.append(f"  [mapped] {mapped_str}")
+
+    if result.fields_unmapped:
+        unmapped_str = ", ".join(result.fields_unmapped[:10])
+        if len(result.fields_unmapped) > 10:
+            unmapped_str += f" (+{len(result.fields_unmapped) - 10} more)"
+        lines.append(f"  [unmapped -> extras_json] {unmapped_str}")
+
+    lines.append(f"  Ingested: {result.events_ingested} events")
+
+    if result.events_skipped > 0:
+        lines.append(f"  Skipped: {result.events_skipped} rows")
+        if result.errors and verbose:
+            err = result.errors[0]
+            lines.append(f"    Line {err['line']}: {err['error']}")
+
+    for suggestion in result.suggestions:
+        lines.append(f"\n  Tip: {suggestion}")
+
+    return lines
+
+
+def preview(
+    case_id: str,
+    source: str,
+    file_path: Path,
+    limit: int = 5,
+) -> Dict:
+    """Preview how a file would be ingested without committing.
+
+    Args:
+        case_id: Case identifier (for case-specific mappers)
+        source: Source system name
+        file_path: Path to the file to preview
+        limit: Number of rows to preview
+
+    Returns:
+        Dict with mapper info and preview rows
+    """
+    paths = case_paths(case_id)
+    case_dir = paths["case_dir"] if paths["case_dir"].exists() else None
+
+    # Get mapper with type info
+    mapper, mapper_type = get_mapper(source, case_dir)
+
+    result = {
+        "source": source,
+        "file": str(file_path),
+        "mapper_type": mapper_type,
+        "mapper_class": type(mapper).__name__,
+        "field_map": mapper.field_map,
+        "rows": [],
+        "errors": [],
+        "fields_in_source": [],
+        "fields_mapped": {},
+        "fields_unmapped": [],
+    }
+
+    # Read and process limited rows
+    count = 0
+    for line_no, row in ingest_lib.iter_rows(file_path):
+        if count >= limit:
+            break
+
+        # Track source fields on first row
+        if count == 0:
+            result["fields_in_source"] = list(row.keys())
+            source_keys_lower = {k.lower() for k in row.keys()}
+
+            result["fields_mapped"] = {
+                src: mapper.field_map[src]
+                for src in mapper.field_map
+                if src.lower() in source_keys_lower
+            }
+
+            mapped_source_fields = {k.lower() for k in mapper.field_map.keys()}
+            result["fields_unmapped"] = [
+                k for k in row.keys()
+                if k.lower() not in mapped_source_fields
+            ]
+
+        try:
+            mapped = mapper.map_row(row)
+            # Extract key fields for preview
+            preview_row = {
+                "event_ts": mapped.get("event_ts", ""),
+                "event_type": mapped.get("event_type", ""),
+                "host": mapped.get("host", ""),
+                "user": mapped.get("user", ""),
+                "src_ip": mapped.get("src_ip", ""),
+                "message": (mapped.get("message") or "")[:50],
+            }
+            result["rows"].append(preview_row)
+        except Exception as e:
+            result["errors"].append({
+                "line": line_no,
+                "error": str(e),
+            })
+
+        count += 1
+
+    return result
+
+
+def print_preview(preview_result: Dict) -> List[str]:
+    """Format preview result for CLI output.
+
+    Args:
+        preview_result: Result from preview()
+
+    Returns:
+        List of formatted output lines
+    """
+    lines = []
+    lines.append(f"\nPreview: {Path(preview_result['file']).name}")
+    lines.append(f"Mapper: {preview_result['mapper_class']} ({preview_result['mapper_type']})")
+
+    if preview_result["fields_mapped"]:
+        mapped_str = ", ".join(
+            f"{k}->{v}" for k, v in list(preview_result["fields_mapped"].items())[:6]
+        )
+        lines.append(f"\nMapped fields: {mapped_str}")
+
+    if preview_result["fields_unmapped"]:
+        unmapped_str = ", ".join(preview_result["fields_unmapped"][:8])
+        lines.append(f"Unmapped fields: {unmapped_str}")
+
+    # Table header
+    lines.append("")
+    cols = ["event_ts", "event_type", "host", "user", "src_ip", "message"]
+    widths = [20, 14, 12, 12, 15, 30]
+    header = " | ".join(col.ljust(w) for col, w in zip(cols, widths))
+    lines.append(header)
+    lines.append("-" * len(header))
+
+    # Table rows
+    for row in preview_result["rows"]:
+        row_str = " | ".join(
+            str(row.get(col, ""))[:w].ljust(w)
+            for col, w in zip(cols, widths)
+        )
+        lines.append(row_str)
+
+    # Errors
+    for err in preview_result["errors"]:
+        lines.append(f"[ERROR] Line {err['line']}: {err['error']}")
+
+    return lines

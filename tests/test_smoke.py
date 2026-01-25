@@ -30,10 +30,10 @@ class SmokeTest(unittest.TestCase):
                 time_end="2024-07-01T12:15:00Z",
                 file_path=Path("sample_data/kusto.ndjson"),
             )
-            count_1 = commands.ingest_run(case_id, run_id_1)
-            count_2 = commands.ingest_run(case_id, run_id_2)
-            self.assertGreater(count_1, 0)
-            self.assertGreater(count_2, 0)
+            result_1 = commands.ingest_run(case_id, run_id_1)
+            result_2 = commands.ingest_run(case_id, run_id_2)
+            self.assertGreater(result_1.events_ingested, 0)
+            self.assertGreater(result_2.events_ingested, 0)
         finally:
             if case_dir.exists():
                 shutil.rmtree(case_dir)

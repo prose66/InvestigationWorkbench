@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from cli.utils import compact_json, normalize_ts, sha256_text
-from cli.mappers import FieldMapper, GenericMapper, get_mapper
+from cli.mappers import FieldMapper, get_mapper_simple
 
 REQUIRED_FIELDS = [
     "event_ts",
@@ -76,11 +77,63 @@ KNOWN_FIELDS = set(REQUIRED_FIELDS + EXTENDED_FIELDS + [
 ])
 
 
-def _normalize_value(value: str | None) -> str | None:
+@dataclass
+class IngestReport:
+    """Enhanced feedback about an ingest operation."""
+
+    source: str
+    mapper_type: str  # "yaml_case", "yaml_builtin", "builtin", "generic"
+    total_rows: int = 0
+    ingested: int = 0
+    skipped: int = 0
+    fields_mapped: Dict[str, str] = field(default_factory=dict)  # source_field -> unified_field
+    fields_unmapped: List[str] = field(default_factory=list)  # Stored in extras_json
+    errors: List[Dict] = field(default_factory=list)  # {line, error, sample_row}
+    suggestions: List[str] = field(default_factory=list)
+
+    def add_error(self, line: int, error: str, sample_row: Optional[Dict] = None):
+        """Add an error with optional sample data."""
+        err = {"line": line, "error": error}
+        if sample_row:
+            # Keep first 5 fields as sample
+            err["sample"] = {k: v for k, v in list(sample_row.items())[:5]}
+        self.errors.append(err)
+
+    def generate_suggestions(self):
+        """Generate helpful suggestions based on errors."""
+        if not self.errors:
+            return
+
+        # Check for common issues
+        first_error = self.errors[0]["error"] if self.errors else ""
+
+        if "event_ts" in first_error or "Missing required fields" in first_error:
+            self.suggestions.append(
+                f"Create a YAML config to map your timestamp field to event_ts. "
+                f"See: cases/<case_id>/mappers/{self.source}.yaml"
+            )
+
+        if self.fields_unmapped and len(self.fields_unmapped) > 5:
+            self.suggestions.append(
+                f"Many unmapped fields ({len(self.fields_unmapped)}) went to extras_json. "
+                f"Consider creating a custom mapper for better field mapping."
+            )
+
+        if self.mapper_type == "generic" and self.skipped > 0:
+            self.suggestions.append(
+                f"Using generic mapper. Create a YAML config for source '{self.source}' "
+                f"to improve field mapping."
+            )
+
+
+def _normalize_value(value: Any) -> str | None:
     if value is None:
         return None
-    text = value.strip()
-    return text or None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    # Handle non-string types (int, float, bool) from transforms
+    return str(value)
 
 
 def _parse_ndjson(path: Path) -> Iterator[Tuple[int, Dict[str, str]]]:
@@ -144,7 +197,7 @@ def map_and_validate(
         Tuple of (mapped_row, missing_fields)
     """
     if mapper is None:
-        mapper = get_mapper(source)
+        mapper = get_mapper_simple(source)
     
     mapped = mapper.map_row(row)
     missing = validate_row(mapped, lenient=lenient)
@@ -200,7 +253,7 @@ def prepare_event(
     if mapper is not None:
         row = mapper.map_row(row)
     elif source:
-        row = get_mapper(source).map_row(row)
+        row = get_mapper_simple(source).map_row(row)
     
     normalized = {key: _normalize_value(value) for key, value in row.items()}
     missing = validate_row(normalized, lenient=lenient)

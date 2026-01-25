@@ -1,0 +1,67 @@
+# Firewall log mapper (Palo Alto style)
+# Copy this file to cases/<case_id>/mappers/firewall.yaml to customize
+
+source: firewall
+description: "Palo Alto-style firewall syslog exports"
+
+# Map source fields to unified schema
+field_map:
+  # Timestamps
+  receive_time: event_ts
+  generated_time: event_ts
+  time_generated: event_ts
+
+  # Network fields
+  src: src_ip
+  source: src_ip
+  source_ip: src_ip
+  dst: dest_ip
+  destination: dest_ip
+  destination_ip: dest_ip
+  srcport: src_port
+  dstport: dest_port
+
+  # User/identity
+  srcuser: user
+  source_user: user
+
+  # Action/outcome
+  action: outcome
+  result: outcome
+
+  # Message/description
+  rule: message
+  rule_name: message
+
+  # Traffic stats
+  bytes_sent: bytes_out
+  bytes_received: bytes_in
+  bytes: bytes_out
+
+  # Protocol
+  proto: protocol
+  app: protocol
+
+# Default values for fields not in source data
+defaults:
+  event_type: "network_flow"
+  source_system: "firewall"
+  severity: "info"
+
+# Only require these fields (relaxes default validation)
+required_only:
+  - event_ts
+  - event_type
+
+# Optional: field-specific transforms
+transforms:
+  event_ts:
+    format: "%Y/%m/%d %H:%M:%S"
+  bytes_out:
+    type: int
+  bytes_in:
+    type: int
+  src_port:
+    type: int
+  dest_port:
+    type: int
