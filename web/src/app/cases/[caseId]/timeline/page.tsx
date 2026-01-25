@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams } from "next/navigation";
+import { useState, useCallback, useRef } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
   Clock,
   ArrowUpDown,
@@ -9,12 +9,6 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  X,
-  Eye,
-  Filter,
-  Zap,
-  Terminal,
-  ExternalLink,
 } from "lucide-react";
 import { useEvents } from "@/hooks/useEvents";
 import { usePivotStore, getPivotFilterParams } from "@/stores/pivotStore";
@@ -24,20 +18,72 @@ import {
   getSeverityRowClass,
 } from "@/components/common/SeverityBadge";
 import { PivotChain } from "@/components/entity/PivotChain";
-import { formatDate, truncate } from "@/lib/utils";
+import { EventDetailModal } from "@/components/timeline/EventDetailModal";
+import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/lib/types";
 
-export default function TimelinePage() {
+// URL param helpers
+function useTimelineParams() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const params = useParams();
   const caseId = params.caseId as string;
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
-  const [sortBy, setSortBy] = useState<"event_ts" | "-event_ts">("event_ts");
+
+  const page = parseInt(searchParams.get("page") || "1", 10);
+  const pageSize = parseInt(searchParams.get("pageSize") || "50", 10);
+  const sortBy = (searchParams.get("sort") as "event_ts" | "-event_ts") || "event_ts";
+
+  const setParams = useCallback(
+    (updates: { page?: number; sort?: string }) => {
+      const newParams = new URLSearchParams(searchParams.toString());
+
+      if (updates.page !== undefined) {
+        if (updates.page === 1) {
+          newParams.delete("page");
+        } else {
+          newParams.set("page", updates.page.toString());
+        }
+      }
+
+      if (updates.sort !== undefined) {
+        if (updates.sort === "event_ts") {
+          newParams.delete("sort");
+        } else {
+          newParams.set("sort", updates.sort);
+        }
+      }
+
+      const queryString = newParams.toString();
+      router.push(
+        `/cases/${caseId}/timeline${queryString ? `?${queryString}` : ""}`,
+        { scroll: false }
+      );
+    },
+    [searchParams, router, caseId]
+  );
+
+  return { page, pageSize, sortBy, setParams, caseId };
+}
+
+export default function TimelinePage() {
+  const { page, pageSize, sortBy, setParams, caseId } = useTimelineParams();
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const { pivotEntities } = usePivotStore();
   const { pivotToTimeline, navigateToEntity } = usePivotContext();
+
+  // Memoized handlers for pagination and sorting
+  const setPage = useCallback(
+    (newPage: number) => setParams({ page: newPage }),
+    [setParams]
+  );
+
+  const toggleSort = useCallback(
+    () => setParams({ sort: sortBy === "event_ts" ? "-event_ts" : "event_ts" }),
+    [setParams, sortBy]
+  );
 
   // Build filter params from pivot entities
   const pivotFilters = getPivotFilterParams(pivotEntities);
@@ -53,7 +99,11 @@ export default function TimelinePage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyan border-t-transparent mb-3" />
+          <div
+            className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyan border-t-transparent mb-3"
+            role="status"
+            aria-label="Loading events"
+          />
           <p className="text-muted-foreground text-sm">Loading events...</p>
         </div>
       </div>
@@ -75,7 +125,7 @@ export default function TimelinePage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-cyan/10 pulse-glow">
-            <Clock className="w-5 h-5 text-cyan" />
+            <Clock className="w-5 h-5 text-cyan" aria-hidden="true" />
           </div>
           <div>
             <h1 className="text-2xl font-bold text-foreground">
@@ -93,16 +143,15 @@ export default function TimelinePage() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() =>
-              setSortBy(sortBy === "event_ts" ? "-event_ts" : "event_ts")
-            }
+            onClick={toggleSort}
             className={cn(
               "flex items-center gap-2 px-3 py-2 rounded-lg text-sm",
               "bg-secondary border border-border",
               "hover:border-cyan/30 transition-all duration-200"
             )}
+            aria-label={`Sort by ${sortBy === "event_ts" ? "newest" : "oldest"} first`}
           >
-            <ArrowUpDown className="w-4 h-4" />
+            <ArrowUpDown className="w-4 h-4" aria-hidden="true" />
             {sortBy === "event_ts" ? "Oldest First" : "Newest First"}
           </button>
         </div>
@@ -114,16 +163,19 @@ export default function TimelinePage() {
       {/* Events Table */}
       <div className="flex-1 overflow-hidden rounded-xl border border-border glow-border-subtle">
         <div className="overflow-auto h-full scan-lines">
-          <table className="data-table">
+          <table className="data-table" aria-label="Timeline events">
+            <caption className="sr-only">
+              Security events timeline showing {data?.total ?? 0} events{pivotEntities.length > 0 ? " (filtered)" : ""}
+            </caption>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Source</th>
-                <th>Type</th>
-                <th>Host</th>
-                <th>User</th>
-                <th>Severity</th>
-                <th>Message</th>
+                <th scope="col">Time</th>
+                <th scope="col">Source</th>
+                <th scope="col">Type</th>
+                <th scope="col">Host</th>
+                <th scope="col">User</th>
+                <th scope="col">Severity</th>
+                <th scope="col">Message</th>
               </tr>
             </thead>
             <tbody>
@@ -136,6 +188,15 @@ export default function TimelinePage() {
                   )}
                   style={{ animationDelay: `${Math.min(index, 10) * 20}ms` }}
                   onClick={() => setSelectedEvent(event)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedEvent(event);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Event at ${formatDate(event.event_ts)}: ${event.event_type} - ${event.message || "No message"}`}
                 >
                   <td className="whitespace-nowrap font-mono text-xs">
                     {formatDate(event.event_ts)}
@@ -236,6 +297,7 @@ export default function TimelinePage() {
             navigateToEntity(type, value);
             setSelectedEvent(null);
           }}
+          closeButtonRef={closeButtonRef}
         />
       )}
     </div>
@@ -258,6 +320,7 @@ function PaginationButton({
       onClick={onClick}
       disabled={disabled}
       title={label}
+      aria-label={label}
       className={cn(
         "p-2 rounded-lg border border-border",
         "hover:border-cyan/30 hover:bg-secondary",
@@ -265,200 +328,7 @@ function PaginationButton({
         "transition-all duration-200"
       )}
     >
-      <Icon className="w-4 h-4" />
+      <Icon className="w-4 h-4" aria-hidden="true" />
     </button>
-  );
-}
-
-function EventDetailModal({
-  event,
-  onClose,
-  onPivot,
-  onNavigate,
-}: {
-  event: Event;
-  onClose: () => void;
-  onPivot: (type: string, value: string) => void;
-  onNavigate: (type: string, value: string) => void;
-}) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-content max-w-2xl w-full max-h-[85vh] overflow-hidden m-4 fade-in-up"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-1.5 rounded-lg bg-cyan/10">
-              <Eye className="w-4 h-4 text-cyan" />
-            </div>
-            <h2 className="font-semibold text-foreground">Event Details</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-5 overflow-auto max-h-[calc(85vh-60px)]">
-          {/* Quick Pivots */}
-          <div className="flex flex-wrap gap-2">
-            {event.host && (
-              <>
-                <QuickPivotButton
-                  label={`+Filter: ${event.host}`}
-                  onClick={() => onPivot("host", event.host!)}
-                  variant="primary"
-                />
-                <QuickPivotButton
-                  label="View Host"
-                  onClick={() => onNavigate("host", event.host!)}
-                  variant="secondary"
-                />
-              </>
-            )}
-            {event.user && (
-              <>
-                <QuickPivotButton
-                  label={`+Filter: ${event.user}`}
-                  onClick={() => onPivot("user", event.user!)}
-                  variant="primary"
-                />
-                <QuickPivotButton
-                  label="View User"
-                  onClick={() => onNavigate("user", event.user!)}
-                  variant="secondary"
-                />
-              </>
-            )}
-            {event.src_ip && (
-              <QuickPivotButton
-                label={`+Filter: ${event.src_ip}`}
-                onClick={() => onPivot("ip", event.src_ip!)}
-                variant="primary"
-              />
-            )}
-          </div>
-
-          {/* Event Info Grid */}
-          <div className="grid grid-cols-2 gap-4">
-            <InfoField label="Time" value={formatDate(event.event_ts)} mono />
-            <InfoField label="Source System" value={event.source_system} />
-            <InfoField label="Event Type" value={event.event_type} />
-            <InfoField
-              label="Severity"
-              value={<SeverityBadge severity={event.severity} />}
-            />
-            {event.host && <InfoField label="Host" value={event.host} mono />}
-            {event.user && <InfoField label="User" value={event.user} mono />}
-            {event.src_ip && (
-              <InfoField label="Source IP" value={event.src_ip} mono />
-            )}
-            {event.dest_ip && (
-              <InfoField label="Dest IP" value={event.dest_ip} mono />
-            )}
-            {event.process_name && (
-              <InfoField label="Process" value={event.process_name} mono />
-            )}
-            {event.tactic && (
-              <InfoField label="MITRE Tactic" value={event.tactic} />
-            )}
-            {event.technique && (
-              <InfoField label="MITRE Technique" value={event.technique} />
-            )}
-          </div>
-
-          {/* Message */}
-          {event.message && (
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-2">
-                Message
-              </p>
-              <div className="bg-secondary/50 border border-border rounded-lg p-4 text-sm">
-                {event.message}
-              </div>
-            </div>
-          )}
-
-          {/* Process Details */}
-          {event.process_cmdline && (
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Terminal className="w-3 h-3 text-muted-foreground" />
-                <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
-                  Command Line
-                </p>
-              </div>
-              <pre className="bg-background border border-border rounded-lg p-4 text-sm font-mono break-all whitespace-pre-wrap overflow-x-auto">
-                {event.process_cmdline}
-              </pre>
-            </div>
-          )}
-
-          {/* Raw JSON */}
-          {event.raw_json && (
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-2">
-                Raw JSON
-              </p>
-              <pre className="bg-background border border-border rounded-lg p-4 text-xs font-mono overflow-auto max-h-48">
-                {JSON.stringify(event.raw_json, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QuickPivotButton({
-  label,
-  onClick,
-  variant,
-}: {
-  label: string;
-  onClick: () => void;
-  variant: "primary" | "secondary";
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium",
-        "transition-all duration-200",
-        variant === "primary"
-          ? "bg-cyan/15 text-cyan border border-cyan/30 hover:bg-cyan/25"
-          : "bg-secondary text-muted-foreground border border-border hover:text-foreground hover:border-cyan/30"
-      )}
-    >
-      {variant === "primary" && <Filter className="w-3 h-3" />}
-      {variant === "secondary" && <ExternalLink className="w-3 h-3" />}
-      {label}
-    </button>
-  );
-}
-
-function InfoField({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div>
-      <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium mb-1">
-        {label}
-      </p>
-      <p className={cn("text-sm text-foreground", mono && "font-mono")}>
-        {value}
-      </p>
-    </div>
   );
 }

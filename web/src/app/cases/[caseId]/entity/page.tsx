@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import {
@@ -23,7 +24,8 @@ import { usePivotStore, createPivotEntity } from "@/stores/pivotStore";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
-const entityIcons = {
+// Hoisted outside component to prevent re-creation
+const entityIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   host: Server,
   user: User,
   ip: Globe,
@@ -54,31 +56,33 @@ export default function EntityPage() {
     useEntityRelationships(caseId, entityType, entityValue);
 
   // Pivot to timeline with BOTH current entity AND related entity (intersection)
-  const pivotWithCurrentEntity = (relatedType: string, relatedValue: string) => {
-    // Set both entities in a single state update to avoid race conditions
-    const entities = [];
+  const pivotWithCurrentEntity = useCallback(
+    (relatedType: string, relatedValue: string) => {
+      const entities = [];
 
-    // Add current entity first
-    if (entityType && entityValue) {
-      entities.push(createPivotEntity(entityType, entityValue));
-    }
+      // Add current entity first
+      if (entityType && entityValue) {
+        entities.push(createPivotEntity(entityType, entityValue));
+      }
 
-    // Add the related entity
-    entities.push(createPivotEntity(relatedType, relatedValue));
+      // Add the related entity
+      entities.push(createPivotEntity(relatedType, relatedValue));
 
-    // Set both at once
-    setPivotEntities(entities);
+      // Set both at once
+      setPivotEntities(entities);
 
-    // Navigate to timeline
-    router.push(`/cases/${caseId}/timeline`);
-  };
+      // Navigate to timeline
+      router.push(`/cases/${caseId}/timeline`);
+    },
+    [caseId, entityType, entityValue, router, setPivotEntities]
+  );
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2 rounded-lg bg-cyan/10 pulse-glow">
-          <Users className="w-5 h-5 text-cyan" />
+          <Users className="w-5 h-5 text-cyan" aria-hidden="true" />
         </div>
         <div>
           <h1 className="text-2xl font-bold text-foreground">Entity Analysis</h1>
@@ -103,10 +107,8 @@ export default function EntityPage() {
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-secondary">
                   {(() => {
-                    const Icon =
-                      entityIcons[entityType as keyof typeof entityIcons] ||
-                      Users;
-                    return <Icon className="w-5 h-5 text-cyan" />;
+                    const Icon = entityIcons[entityType] || Users;
+                    return <Icon className="w-5 h-5 text-cyan" aria-hidden="true" />;
                   })()}
                 </div>
                 <div>
@@ -122,7 +124,11 @@ export default function EntityPage() {
 
             {loadingSummary ? (
               <div className="flex items-center justify-center py-8">
-                <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-cyan border-t-transparent" />
+                <div
+                  className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-cyan border-t-transparent"
+                  role="status"
+                  aria-label="Loading entity summary"
+                />
               </div>
             ) : summary ? (
               <>
@@ -159,7 +165,7 @@ export default function EntityPage() {
                     }
                     className="btn-primary flex items-center gap-2"
                   >
-                    <Eye className="w-4 h-4" />
+                    <Eye className="w-4 h-4" aria-hidden="true" />
                     View All Events
                   </button>
                   <button
@@ -171,7 +177,7 @@ export default function EntityPage() {
                       "transition-all duration-200"
                     )}
                   >
-                    <Filter className="w-4 h-4" />
+                    <Filter className="w-4 h-4" aria-hidden="true" />
                     Add to Filters
                   </button>
                 </div>
@@ -187,7 +193,7 @@ export default function EntityPage() {
           {relationships && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <Link2 className="w-4 h-4 text-cyan" />
+                <Link2 className="w-4 h-4 text-cyan" aria-hidden="true" />
                 <h3 className="text-lg font-semibold text-foreground">
                   Related Entities
                 </h3>
@@ -280,14 +286,14 @@ function StatCard({
   return (
     <div className="bg-secondary/30 border border-border/50 rounded-lg p-3">
       <div className="flex items-center gap-2 mb-1">
-        <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+        <Icon className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
         <p className="text-xs text-muted-foreground uppercase tracking-wider">
           {label}
         </p>
       </div>
       <p
         className={cn(
-          "font-semibold",
+          "font-semibold tabular-nums",
           highlight ? "text-cyan text-lg" : "text-foreground text-sm"
         )}
       >
@@ -325,9 +331,9 @@ function RelatedEntityList({
   return (
     <div className="metric-card">
       <div className="flex items-center gap-2 mb-4">
-        <Icon className="w-4 h-4 text-cyan" />
+        <Icon className="w-4 h-4 text-cyan" aria-hidden="true" />
         <h4 className="font-semibold text-foreground">{title}</h4>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground tabular-nums">
           ({entities.length})
         </span>
       </div>
@@ -352,7 +358,7 @@ function RelatedEntityList({
               {entity.entity_value}
             </button>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground tabular-nums">
                 {entity.count.toLocaleString()} shared
               </span>
               <button
@@ -385,8 +391,9 @@ function RelatedEntityList({
                   "hover:text-foreground hover:border-cyan/30 transition-colors"
                 )}
                 title={`View entity details for ${entity.entity_value}`}
+                aria-label={`View entity details for ${entity.entity_value}`}
               >
-                <Eye className="w-3.5 h-3.5" />
+                <Eye className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </div>
           </li>

@@ -27,6 +27,35 @@ export const ENTITY_COLUMN_MAP: Record<string, string> = {
   process: "process_name",
 };
 
+// Helper to create a pivot entity
+export function createPivotEntity(type: string, value: string): PivotEntity {
+  return {
+    type,
+    column: ENTITY_COLUMN_MAP[type] || type,
+    value,
+  };
+}
+
+// Serialize pivot entities to URL param format: "host:web01,user:admin"
+export function serializePivots(entities: PivotEntity[]): string {
+  if (entities.length === 0) return "";
+  return entities.map((e) => `${e.type}:${encodeURIComponent(e.value)}`).join(",");
+}
+
+// Deserialize URL param to pivot entities
+export function deserializePivots(param: string | null): PivotEntity[] {
+  if (!param) return [];
+  try {
+    return param.split(",").map((part) => {
+      const [type, encodedValue] = part.split(":");
+      const value = decodeURIComponent(encodedValue || "");
+      return createPivotEntity(type, value);
+    });
+  } catch {
+    return [];
+  }
+}
+
 export const usePivotStore = create<PivotState>()(
   persist(
     (set, get) => ({
@@ -78,15 +107,6 @@ export const usePivotStore = create<PivotState>()(
     }
   )
 );
-
-// Helper to create a pivot entity
-export function createPivotEntity(type: string, value: string): PivotEntity {
-  return {
-    type,
-    column: ENTITY_COLUMN_MAP[type] || type,
-    value,
-  };
-}
 
 // Helper to get filter params from pivot entities
 export function getPivotFilterParams(

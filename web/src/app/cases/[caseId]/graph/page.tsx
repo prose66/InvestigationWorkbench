@@ -79,22 +79,6 @@ export default function GraphPage() {
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Update dimensions when container size changes
-  useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const { width, height } = containerRef.current.getBoundingClientRect();
-        if (width > 0 && height > 0) {
-          setDimensions({ width, height });
-        }
-      }
-    };
-
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
-  }, [graph]);
-
   const { navigateToEntity, pivotToTimeline } = usePivotContext();
   const { data: entities } = useEntities(caseId, entityType, 50);
 
@@ -110,6 +94,22 @@ export default function GraphPage() {
       ),
     enabled: !!selectedEntity,
   });
+
+  // Update dimensions when container size changes
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        if (width > 0 && height > 0) {
+          setDimensions({ width, height });
+        }
+      }
+    };
+
+    updateDimensions();
+    window.addEventListener("resize", updateDimensions);
+    return () => window.removeEventListener("resize", updateDimensions);
+  }, [graph]);
 
   // Transform graph data for force-graph
   const graphData = graph
@@ -135,14 +135,14 @@ export default function GraphPage() {
   };
 
   const handleNodeClick = useCallback(
-    (node: GraphNode) => {
+    (node: any) => {
       pivotToTimeline(node.entity_type, node.label);
     },
     [pivotToTimeline]
   );
 
   const handleNodeRightClick = useCallback(
-    (node: GraphNode) => {
+    (node: any) => {
       navigateToEntity(node.entity_type, node.label);
     },
     [navigateToEntity]
@@ -180,7 +180,7 @@ export default function GraphPage() {
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2 rounded-lg bg-cyan/10 pulse-glow">
-          <Network className="w-5 h-5 text-cyan" />
+          <Network className="w-5 h-5 text-cyan" aria-hidden="true" />
         </div>
         <div>
           <h1 className="text-2xl font-bold text-foreground">Entity Graph</h1>
@@ -220,7 +220,7 @@ export default function GraphPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
           </div>
         </div>
 
@@ -247,7 +247,7 @@ export default function GraphPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
           </div>
         </div>
 
@@ -256,7 +256,7 @@ export default function GraphPage() {
           disabled={!entityValue}
           className="btn-primary flex items-center gap-2 disabled:opacity-50"
         >
-          <GitBranch className="w-4 h-4" />
+          <GitBranch className="w-4 h-4" aria-hidden="true" />
           Build Graph
         </button>
       </form>
@@ -265,7 +265,11 @@ export default function GraphPage() {
       {isLoading && (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyan border-t-transparent mb-3" />
+            <div
+              className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-cyan border-t-transparent mb-3"
+              role="status"
+              aria-label="Building entity graph"
+            />
             <p className="text-muted-foreground text-sm">
               Building entity graph...
             </p>
@@ -288,8 +292,9 @@ export default function GraphPage() {
                   "hover:border-cyan/30 transition-colors"
                 )}
                 title="Zoom in"
+                aria-label="Zoom in"
               >
-                <ZoomIn className="w-4 h-4" />
+                <ZoomIn className="w-4 h-4" aria-hidden="true" />
               </button>
               <button
                 onClick={handleZoomOut}
@@ -299,8 +304,9 @@ export default function GraphPage() {
                   "hover:border-cyan/30 transition-colors"
                 )}
                 title="Zoom out"
+                aria-label="Zoom out"
               >
-                <ZoomOut className="w-4 h-4" />
+                <ZoomOut className="w-4 h-4" aria-hidden="true" />
               </button>
               <button
                 onClick={handleFitView}
@@ -310,8 +316,9 @@ export default function GraphPage() {
                   "hover:border-cyan/30 transition-colors"
                 )}
                 title="Fit to view"
+                aria-label="Fit to view"
               >
-                <Maximize2 className="w-4 h-4" />
+                <Maximize2 className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
 
@@ -411,9 +418,9 @@ export default function GraphPage() {
             {/* Nodes List */}
             <div className="metric-card">
               <div className="flex items-center gap-2 mb-4">
-                <CircleDot className="w-4 h-4 text-cyan" />
+                <CircleDot className="w-4 h-4 text-cyan" aria-hidden="true" />
                 <h3 className="font-semibold text-foreground">
-                  Nodes ({graph.nodes.length})
+                  Nodes (<span className="tabular-nums">{graph.nodes.length}</span>)
                 </h3>
               </div>
               <div className="space-y-2 max-h-64 overflow-auto">
@@ -443,7 +450,7 @@ export default function GraphPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground text-xs">
+                      <span className="text-muted-foreground text-xs tabular-nums">
                         {node.event_count} events
                       </span>
                       <button
@@ -456,8 +463,9 @@ export default function GraphPage() {
                           "hover:text-foreground hover:border-cyan/30 transition-colors"
                         )}
                         title="View entity details"
+                        aria-label={`View details for ${node.label}`}
                       >
-                        <Eye className="w-3.5 h-3.5" />
+                        <Eye className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                       <button
                         onClick={() =>
@@ -469,8 +477,9 @@ export default function GraphPage() {
                           "hover:bg-cyan/20 transition-colors"
                         )}
                         title="Add to filters"
+                        aria-label={`Add ${node.label} to filters`}
                       >
-                        <Filter className="w-3.5 h-3.5" />
+                        <Filter className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     </div>
                   </div>
@@ -481,9 +490,9 @@ export default function GraphPage() {
             {/* Edges List */}
             <div className="metric-card">
               <div className="flex items-center gap-2 mb-4">
-                <GitBranch className="w-4 h-4 text-cyan" />
+                <GitBranch className="w-4 h-4 text-cyan" aria-hidden="true" />
                 <h3 className="font-semibold text-foreground">
-                  Connections ({graph.edges.length})
+                  Connections (<span className="tabular-nums">{graph.edges.length}</span>)
                 </h3>
               </div>
               <div className="space-y-2 max-h-64 overflow-auto">
@@ -518,7 +527,7 @@ export default function GraphPage() {
                         <span className="font-mono text-xs text-foreground truncate max-w-[80px]">
                           {sourceNode?.label || edge.source}
                         </span>
-                        <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden="true" />
                         <span
                           className={cn(
                             "px-1.5 py-0.5 rounded text-xs border",
@@ -534,8 +543,8 @@ export default function GraphPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1 text-amber-400">
-                        <Zap className="w-3 h-3" />
-                        <span className="text-xs font-medium">{edge.weight}</span>
+                        <Zap className="w-3 h-3" aria-hidden="true" />
+                        <span className="text-xs font-medium tabular-nums">{edge.weight}</span>
                       </div>
                     </div>
                   );
@@ -554,7 +563,7 @@ export default function GraphPage() {
             "border border-border/50"
           )}
         >
-          <Network className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+          <Network className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" aria-hidden="true" />
           <p className="text-muted-foreground">
             Select an entity above to build a relationship graph
           </p>

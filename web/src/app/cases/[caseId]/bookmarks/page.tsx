@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { SeverityBadge } from "@/components/common/SeverityBadge";
 import { useState } from "react";
 import { Trash2, Edit2 } from "lucide-react";
+import type { Bookmark } from "@/lib/types";
 
 export default function BookmarksPage() {
   const params = useParams();
@@ -44,7 +45,7 @@ export default function BookmarksPage() {
     },
   });
 
-  const startEdit = (bookmark: (typeof bookmarks)[0]) => {
+  const startEdit = (bookmark: Bookmark) => {
     setEditingId(bookmark.bookmark_id);
     setEditLabel(bookmark.label || "");
     setEditNotes(bookmark.notes || "");

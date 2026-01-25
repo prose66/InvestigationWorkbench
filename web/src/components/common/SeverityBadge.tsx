@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, AlertCircle, Info, CheckCircle } from "lucide-react";
 
@@ -37,7 +38,7 @@ const severityConfig = {
   },
 };
 
-export function SeverityBadge({
+export const SeverityBadge = memo(function SeverityBadge({
   severity,
   className,
   showIcon = true,
@@ -60,11 +61,11 @@ export function SeverityBadge({
         className
       )}
     >
-      {showIcon && <Icon className="w-3 h-3 mr-1" />}
+      {showIcon && <Icon className="w-3 h-3 mr-1" aria-hidden="true" />}
       <span className="uppercase tracking-wider font-semibold">{severity}</span>
     </span>
   );
-}
+});
 
 // Row highlight component for data tables
 export function getSeverityRowClass(severity?: string): string {

@@ -7,6 +7,8 @@
 
 @layer base {
   :root {
+    color-scheme: dark;
+
     /* Dark command center palette */
     --background: 220 20% 7%;
     --foreground: 210 20% 90%;
@@ -350,4 +352,28 @@
   .delay-150 { animation-delay: 150ms; }
   .delay-225 { animation-delay: 225ms; }
   .delay-300 { animation-delay: 300ms; }
+
+  /* Screen reader only - visually hidden but accessible */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* Tabular numbers for data display */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Content visibility for off-screen performance */
+  .data-table tbody tr {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 48px;
+  }
 }

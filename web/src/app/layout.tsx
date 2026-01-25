@@ -17,6 +17,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <meta name="theme-color" content="hsl(220, 20%, 7%)" />
+      </head>
       <body className={inter.className}>
         <Providers>{children}</Providers>
       </body>

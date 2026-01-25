@@ -1,16 +1,17 @@
 "use client";
 
+import { memo } from "react";
 import { X, Filter, Zap } from "lucide-react";
-import { usePivotStore } from "@/stores/pivotStore";
+import { usePivotContext } from "@/hooks/usePivotContext";
 import { cn } from "@/lib/utils";
 
 interface PivotChainProps {
   className?: string;
 }
 
-export function PivotChain({ className }: PivotChainProps) {
+export const PivotChain = memo(function PivotChain({ className }: PivotChainProps) {
   const { pivotEntities, removePivotEntity, clearPivotEntities } =
-    usePivotStore();
+    usePivotContext();
 
   if (pivotEntities.length === 0) {
     return null;
@@ -35,12 +36,12 @@ export function PivotChain({ className }: PivotChainProps) {
         {/* Icon and label */}
         <div className="flex items-center gap-2 text-cyan">
           <div className="p-1.5 rounded-lg bg-cyan/10 pulse-glow">
-            <Filter className="w-4 h-4" />
+            <Filter className="w-4 h-4" aria-hidden="true" />
           </div>
           <span className="text-sm font-semibold tracking-wide uppercase">
             Active Filters
           </span>
-          <Zap className="w-3 h-3 text-amber-400" />
+          <Zap className="w-3 h-3 text-amber-400" aria-hidden="true" />
         </div>
 
         {/* Filter chips */}
@@ -76,9 +77,10 @@ export function PivotChain({ className }: PivotChainProps) {
                   "transition-all duration-150",
                   "opacity-60 group-hover:opacity-100"
                 )}
+                aria-label={`Remove filter ${entity.type}=${entity.value}`}
                 title={`Remove ${entity.type}=${entity.value}`}
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
             </span>
           ))}
@@ -94,8 +96,9 @@ export function PivotChain({ className }: PivotChainProps) {
             "hover:text-foreground hover:bg-secondary hover:border-cyan/30",
             "transition-all duration-200"
           )}
+          aria-label="Clear all filters"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-3.5 h-3.5" aria-hidden="true" />
           Clear
         </button>
       </div>
@@ -104,4 +107,4 @@ export function PivotChain({ className }: PivotChainProps) {
       <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan/50 to-transparent" />
     </div>
   );
-}
+});
