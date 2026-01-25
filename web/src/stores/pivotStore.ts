@@ -15,6 +15,7 @@ interface PivotState {
   removePivotEntity: (index: number) => void;
   clearPivotEntities: () => void;
   setPivotEntitySingle: (entity: PivotEntity) => void;
+  setPivotEntities: (entities: PivotEntity[]) => void;
 }
 
 // Map entity types to column names
@@ -66,6 +67,10 @@ export const usePivotStore = create<PivotState>()(
 
       setPivotEntitySingle: (entity) => {
         set({ pivotEntities: [entity] });
+      },
+
+      setPivotEntities: (entities) => {
+        set({ pivotEntities: entities });
       },
     }),
     {

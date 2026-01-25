@@ -42,7 +42,7 @@ export default function EntityPage() {
   const { pivotToTimeline, pivotToTimelineSingle, navigateToEntity } =
     usePivotContext();
 
-  const { clearPivotEntities, addPivotEntity } = usePivotStore();
+  const { setPivotEntities } = usePivotStore();
 
   const { data: summary, isLoading: loadingSummary } = useEntitySummary(
     caseId,
@@ -55,16 +55,19 @@ export default function EntityPage() {
 
   // Pivot to timeline with BOTH current entity AND related entity (intersection)
   const pivotWithCurrentEntity = (relatedType: string, relatedValue: string) => {
-    // Clear existing pivots and add both entities for intersection
-    clearPivotEntities();
+    // Set both entities in a single state update to avoid race conditions
+    const entities = [];
 
     // Add current entity first
     if (entityType && entityValue) {
-      addPivotEntity(createPivotEntity(entityType, entityValue));
+      entities.push(createPivotEntity(entityType, entityValue));
     }
 
     // Add the related entity
-    addPivotEntity(createPivotEntity(relatedType, relatedValue));
+    entities.push(createPivotEntity(relatedType, relatedValue));
+
+    // Set both at once
+    setPivotEntities(entities);
 
     // Navigate to timeline
     router.push(`/cases/${caseId}/timeline`);

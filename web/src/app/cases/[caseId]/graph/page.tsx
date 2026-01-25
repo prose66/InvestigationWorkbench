@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
@@ -75,7 +75,25 @@ export default function GraphPage() {
     value: string;
   } | null>(null);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
   const graphRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Update dimensions when container size changes
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        if (width > 0 && height > 0) {
+          setDimensions({ width, height });
+        }
+      }
+    };
+
+    updateDimensions();
+    window.addEventListener("resize", updateDimensions);
+    return () => window.removeEventListener("resize", updateDimensions);
+  }, [graph]);
 
   const { navigateToEntity, pivotToTimeline } = usePivotContext();
   const { data: entities } = useEntities(caseId, entityType, 50);
@@ -259,7 +277,7 @@ export default function GraphPage() {
       {graph && (
         <div className="space-y-4">
           {/* Graph Canvas */}
-          <div className="metric-card relative" style={{ height: "500px" }}>
+          <div ref={containerRef} className="metric-card relative" style={{ height: "500px" }}>
             {/* Controls */}
             <div className="absolute top-4 right-4 z-10 flex gap-2">
               <button
@@ -338,6 +356,8 @@ export default function GraphPage() {
             {/* Force Graph */}
             <ForceGraph2D
               ref={graphRef}
+              width={dimensions.width}
+              height={dimensions.height}
               graphData={graphData}
               nodeLabel={(node: any) => `${node.entity_type}: ${node.label}`}
               nodeColor={(node: any) => node.color}

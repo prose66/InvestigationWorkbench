@@ -12,3 +12,10 @@ streamlit.log
 .env
 sample_data/
 !sample_data/**
+
+# Node/Next.js
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
