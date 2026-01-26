@@ -109,6 +109,53 @@ def parse_file_content(content: str, filename: str) -> Tuple[List[Dict[str, Any]
     return rows, file_format, len(rows)
 
 
+def build_entity_fields_dict(
+    entity_fields: List[str],
+    field_mappings: Dict[str, str],
+) -> Dict[str, List[str]]:
+    """Convert list of entity source fields to entity_type -> [fields] dict.
+
+    Args:
+        entity_fields: List of source field names marked as entities
+        field_mappings: Dict of source_field -> unified_field
+
+    Returns:
+        Dict of entity_type -> [unified_field_names]
+    """
+    # Unified fields that are entity-related
+    entity_unified_fields = {
+        "host": "host",
+        "user": "user",
+        "src_ip": "ip",
+        "dest_ip": "ip",
+        "file_hash": "hash",
+        "process_name": "process",
+    }
+
+    result: Dict[str, List[str]] = {}
+
+    for source_field in entity_fields:
+        unified_field = field_mappings.get(source_field)
+        if not unified_field:
+            continue
+
+        # Determine entity type from unified field
+        entity_type = entity_unified_fields.get(unified_field)
+        if entity_type:
+            if entity_type not in result:
+                result[entity_type] = []
+            if unified_field not in result[entity_type]:
+                result[entity_type].append(unified_field)
+        else:
+            # Custom entity type - use the unified field name as entity type
+            if unified_field not in result:
+                result[unified_field] = []
+            if unified_field not in result[unified_field]:
+                result[unified_field].append(unified_field)
+
+    return result
+
+
 @router.post("/preview", response_model=PreviewResponse)
 def upload_preview(case_id: str, request: PreviewRequest):
     """Upload file and return preview data with suggested mappings."""
@@ -186,6 +233,11 @@ def commit_ingest(case_id: str, request: IngestRequest):
         if mapping.unified_field:  # Skip ignored fields
             custom_field_map[mapping.source_field] = mapping.unified_field
 
+    # Build entity fields dict from request
+    entity_fields_dict = build_entity_fields_dict(
+        request.entity_fields, custom_field_map
+    )
+
     # Save YAML mapper if requested
     mapper_saved = False
     if request.save_mapper and custom_field_map:
@@ -194,6 +246,7 @@ def commit_ingest(case_id: str, request: IngestRequest):
             request.source,
             custom_field_map,
             paths["case_dir"],
+            entity_fields=entity_fields_dict,
         )
 
     # Write content to temp file
@@ -303,20 +356,50 @@ def save_yaml_mapper(
     source: str,
     field_map: Dict[str, str],
     case_dir: Path,
+    entity_fields: Optional[Dict[str, List[str]]] = None,
 ) -> bool:
-    """Save a YAML mapper config for a case."""
+    """Save/merge field mappings into unified case schema.
+
+    All field mappings are merged into a single case_schema.yaml file,
+    ensuring consistent mappings across all data sources in a case.
+    New mappings override existing ones for the same source field.
+
+    Args:
+        case_id: Case identifier
+        source: Source system name (for metadata)
+        field_map: Dict of source_field -> unified_field
+        case_dir: Path to case directory
+        entity_fields: Dict of entity_type -> [field_names] for entity extraction
+    """
     try:
         mappers_dir = case_dir / "mappers"
         mappers_dir.mkdir(parents=True, exist_ok=True)
 
+        mapper_path = mappers_dir / "case_schema.yaml"
+
+        # Load existing config if file exists
+        existing_map: Dict[str, str] = {}
+        existing_entities: Dict[str, List[str]] = {}
+        if mapper_path.exists():
+            with mapper_path.open("r", encoding="utf-8") as f:
+                existing = yaml.safe_load(f) or {}
+                existing_map = existing.get("field_map", {})
+                existing_entities = existing.get("entity_fields", {})
+
+        # Merge new mappings (new values override existing)
+        merged_map = {**existing_map, **field_map}
+
+        # Merge entity fields (new values override existing)
+        merged_entities = {**existing_entities, **(entity_fields or {})}
+
         config = {
-            "source": source,
-            "description": f"Custom mapper for {source} created via UI",
-            "field_map": field_map,
+            "source": "case_unified",
+            "description": f"Unified case schema for {case_id}",
+            "field_map": merged_map,
+            "entity_fields": merged_entities,
             "required_only": ["event_ts", "event_type"],
         }
 
-        mapper_path = mappers_dir / f"{source.lower()}.yaml"
         with mapper_path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(config, f, default_flow_style=False)
 
@@ -425,20 +508,21 @@ def commit_batch(case_id: str, request: BatchIngestRequest):
         if mapping.unified_field:
             custom_field_map[mapping.source_field] = mapping.unified_field
 
-    # Save mapper if requested (use first file's source)
+    # Build entity fields dict from request
+    entity_fields_dict = build_entity_fields_dict(
+        request.entity_fields, custom_field_map
+    )
+
+    # Save mapper if requested (merges into unified case_schema.yaml)
     mapper_saved = False
     if request.save_mapper and custom_field_map and request.files:
-        # Save a combined mapper for each unique source
-        unique_sources = set(f.source for f in request.files)
-        for source in unique_sources:
-            saved = save_yaml_mapper(
-                case_id,
-                source,
-                custom_field_map,
-                paths["case_dir"],
-            )
-            if saved:
-                mapper_saved = True
+        mapper_saved = save_yaml_mapper(
+            case_id,
+            "batch",  # Source name for metadata only
+            custom_field_map,
+            paths["case_dir"],
+            entity_fields=entity_fields_dict,
+        )
 
     results: List[IngestResponse] = []
     total_ingested = 0

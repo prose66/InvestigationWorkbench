@@ -3,29 +3,37 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Query
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases, query_df, query_one
-from services.entities import (
-    ENTITY_TYPES,
+from api.services.db import list_cases, query_df, query_one
+from api.services.entities import (
     RELATED_ENTITY_MAP,
     entity_options,
     entity_where_clause,
+    load_entity_config,
 )
-
 from api.schemas.entities import Entity, EntitySummary, RelatedEntity, EntityRelationships
 
 router = APIRouter(prefix="/cases/{case_id}", tags=["entities"])
 
 
+@router.get("/entity-types")
+def get_entity_types(case_id: str):
+    """Get configured entity types for a case.
+
+    Returns the entity types from case_schema.yaml if configured,
+    otherwise returns the default entity types.
+    """
+    cases = list_cases()
+    if case_id not in cases:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
+
+    entity_types, _ = load_entity_config(case_id)
+    return {"entity_types": entity_types}
+
+
 @router.get("/entities", response_model=List[Entity])
 def get_entities(
     case_id: str,
-    entity_type: str = Query(..., enum=ENTITY_TYPES),
+    entity_type: str = Query(...),
     limit: int = Query(default=100, ge=1, le=500),
 ):
     """Get entities of a specific type for a case."""
@@ -33,12 +41,20 @@ def get_entities(
     if case_id not in cases:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
 
+    # Validate entity type against case config
+    entity_types, _ = load_entity_config(case_id)
+    if entity_type not in entity_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid entity type: {entity_type}. Valid types: {entity_types}",
+        )
+
     entity_values = entity_options(case_id, entity_type, limit=limit)
 
     # Get stats for each entity
     entities = []
     for value in entity_values[:limit]:
-        entity_clause, entity_params = entity_where_clause(entity_type, value)
+        entity_clause, entity_params = entity_where_clause(case_id, entity_type, value)
         stats = query_one(
             case_id,
             f"""
@@ -70,10 +86,11 @@ def get_entity_summary(case_id: str, entity_type: str, entity_value: str):
     if case_id not in cases:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
 
-    if entity_type not in ENTITY_TYPES:
+    entity_types, _ = load_entity_config(case_id)
+    if entity_type not in entity_types:
         raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
 
-    entity_clause, entity_params = entity_where_clause(entity_type, entity_value)
+    entity_clause, entity_params = entity_where_clause(case_id, entity_type, entity_value)
 
     summary = query_one(
         case_id,
@@ -135,10 +152,11 @@ def get_entity_relationships(
     if case_id not in cases:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
 
-    if entity_type not in ENTITY_TYPES:
+    entity_types, _ = load_entity_config(case_id)
+    if entity_type not in entity_types:
         raise HTTPException(status_code=400, detail=f"Invalid entity type: {entity_type}")
 
-    entity_clause, entity_params = entity_where_clause(entity_type, entity_value)
+    entity_clause, entity_params = entity_where_clause(case_id, entity_type, entity_value)
     base_where = f"e.case_id = ? AND {entity_clause}"
     base_params = [case_id] + entity_params
 
