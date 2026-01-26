@@ -15,6 +15,15 @@ import type {
   SourceCoverage,
   SearchResponse,
   EntityType,
+  PreviewResponse,
+  IngestRequest,
+  IngestResponse,
+  MapperInfo,
+  UnifiedField,
+  BatchPreviewRequest,
+  BatchPreviewResponse,
+  BatchIngestRequest,
+  BatchIngestResponse,
 } from "./types";
 
 const API_BASE = "/api";
@@ -228,4 +237,57 @@ export async function getCoverageGaps(
 
 export async function getSourceCoverage(caseId: string): Promise<SourceCoverage[]> {
   return fetchJSON(`${API_BASE}/cases/${caseId}/coverage`);
+}
+
+// Ingest
+export async function uploadPreview(
+  caseId: string,
+  source: string,
+  content: string,
+  filename: string
+): Promise<PreviewResponse> {
+  return fetchJSON(`${API_BASE}/cases/${caseId}/ingest/preview`, {
+    method: "POST",
+    body: JSON.stringify({ source, content, filename }),
+  });
+}
+
+export async function commitIngest(
+  caseId: string,
+  request: IngestRequest
+): Promise<IngestResponse> {
+  return fetchJSON(`${API_BASE}/cases/${caseId}/ingest/commit`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getMappers(caseId: string): Promise<MapperInfo[]> {
+  return fetchJSON(`${API_BASE}/cases/${caseId}/ingest/mappers`);
+}
+
+export async function getUnifiedFields(): Promise<{ fields: UnifiedField[] }> {
+  // Use a dummy case_id since unified fields are global
+  return fetchJSON(`${API_BASE}/cases/_/ingest/unified-fields`);
+}
+
+// Batch Ingest
+export async function batchPreview(
+  caseId: string,
+  files: BatchPreviewRequest["files"]
+): Promise<BatchPreviewResponse> {
+  return fetchJSON(`${API_BASE}/cases/${caseId}/ingest/preview-batch`, {
+    method: "POST",
+    body: JSON.stringify({ files }),
+  });
+}
+
+export async function batchCommit(
+  caseId: string,
+  request: BatchIngestRequest
+): Promise<BatchIngestResponse> {
+  return fetchJSON(`${API_BASE}/cases/${caseId}/ingest/commit-batch`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
 }

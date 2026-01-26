@@ -176,3 +176,99 @@ export interface PivotEntity {
 // Entity types
 export const ENTITY_TYPES = ["host", "user", "ip", "hash", "process"] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
+
+// Ingest types
+export interface FieldMapping {
+  source_field: string;
+  unified_field: string | null; // null = ignore
+  transform?: { format?: string; type?: string };
+}
+
+export interface PreviewResponse {
+  source_fields: string[];
+  preview_rows: Record<string, unknown>[];
+  total_rows: number;
+  suggested_mappings: Record<string, string>;
+  file_format: "ndjson" | "csv";
+  mapper_type: string;
+}
+
+export interface IngestRequest {
+  source: string;
+  query_name: string;
+  content: string; // Base64 encoded
+  filename: string;
+  field_mappings: FieldMapping[];
+  entity_fields: string[];
+  save_mapper: boolean;
+  time_start?: string;
+  time_end?: string;
+}
+
+export interface IngestResponse {
+  run_id: string;
+  events_ingested: number;
+  events_skipped: number;
+  errors: Array<{ line?: number; error: string; sample?: Record<string, unknown> }>;
+  suggestions: string[];
+  mapper_saved: boolean;
+}
+
+export interface MapperInfo {
+  name: string;
+  type: "yaml_case" | "yaml_builtin" | "builtin";
+  description?: string;
+  source: string;
+  field_count: number;
+}
+
+export interface UnifiedField {
+  name: string;
+  required: boolean;
+}
+
+// Batch ingest types
+export interface FileEntry {
+  id: string;
+  file: File;
+  source: string;
+  queryName: string;
+  previewData: PreviewResponse | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface BatchPreviewRequest {
+  files: Array<{
+    source: string;
+    content: string;
+    filename: string;
+  }>;
+}
+
+export interface BatchPreviewResponse {
+  file_previews: PreviewResponse[];
+  merged_fields: string[];
+  field_sources: Record<string, number[]>; // field → file indices
+  suggested_mappings: Record<string, string>;
+}
+
+export interface BatchIngestRequest {
+  files: Array<{
+    source: string;
+    query_name: string;
+    content: string;
+    filename: string;
+  }>;
+  field_mappings: FieldMapping[];
+  entity_fields: string[];
+  save_mapper: boolean;
+  time_start?: string;
+  time_end?: string;
+}
+
+export interface BatchIngestResponse {
+  results: IngestResponse[];
+  total_ingested: number;
+  total_skipped: number;
+}
