@@ -54,6 +54,24 @@ export async function getCaseSummary(caseId: string): Promise<CaseSummary> {
   return fetchJSON(`${API_BASE}/cases/${caseId}/summary`);
 }
 
+export async function createCase(caseId: string, title?: string): Promise<Case> {
+  return fetchJSON(`${API_BASE}/cases`, {
+    method: "POST",
+    body: JSON.stringify({ case_id: caseId, title }),
+  });
+}
+
+export async function deleteCase(caseId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/cases/${caseId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "Delete failed" }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+}
+
 // Events
 export interface EventFilterParams {
   start_dt?: string;

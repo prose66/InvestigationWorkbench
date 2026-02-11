@@ -4,15 +4,8 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases, db_path, table_exists, now_utc_iso, query_df
-from services.markers import get_timeline_markers, add_timeline_marker, delete_timeline_marker
-
+from api.services.db import list_cases, db_path, table_exists, now_utc_iso, query_df
+from api.services.markers import get_timeline_markers, add_timeline_marker, delete_timeline_marker
 from api.schemas.markers import Marker, MarkerCreate
 
 router = APIRouter(prefix="/cases/{case_id}/markers", tags=["markers"])

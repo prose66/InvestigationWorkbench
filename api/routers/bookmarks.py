@@ -4,14 +4,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases, db_path, query_df, table_exists, now_utc_iso
-
+from api.services.db import list_cases, db_path, query_df, table_exists, now_utc_iso
 from api.schemas.bookmarks import Bookmark, BookmarkCreate, BookmarkUpdate
 
 router = APIRouter(prefix="/cases/{case_id}/bookmarks", tags=["bookmarks"])

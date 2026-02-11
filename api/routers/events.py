@@ -4,15 +4,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases, query_df, time_bounds
-from services.filters import build_filters
-
+from api.services.db import list_cases, query_df, time_bounds
+from api.services.filters import build_filters
 from api.schemas.events import Event, EventsResponse
 
 router = APIRouter(prefix="/cases/{case_id}/events", tags=["events"])

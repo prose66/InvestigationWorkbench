@@ -1,17 +1,18 @@
 """Case-related API endpoints."""
-from typing import List
+import re
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases, query_one, query_df, time_bounds, distinct_values
-
+from api.services.db import list_cases, query_one, query_df, time_bounds, distinct_values, delete_case
 from api.schemas.cases import Case, CaseSummary, QueryRun
+from cli.commands import init_case
+
+
+class CreateCaseRequest(BaseModel):
+    case_id: str
+    title: Optional[str] = None
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -21,6 +22,47 @@ def get_cases():
     """List all available cases."""
     case_ids = list_cases()
     return [Case(case_id=cid) for cid in case_ids]
+
+
+@router.post("", response_model=Case, status_code=201)
+def create_case(request: CreateCaseRequest):
+    """Create a new case."""
+    case_id = request.case_id.strip()
+
+    # Validate case_id format (alphanumeric, hyphens, underscores)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", case_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Case ID must contain only alphanumeric characters, hyphens, and underscores"
+        )
+
+    if len(case_id) < 1 or len(case_id) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="Case ID must be between 1 and 64 characters"
+        )
+
+    # Check if case already exists
+    if case_id in list_cases():
+        raise HTTPException(status_code=409, detail=f"Case '{case_id}' already exists")
+
+    # Create the case using CLI command
+    init_case(case_id, request.title)
+
+    return Case(case_id=case_id)
+
+
+@router.delete("/{case_id}", status_code=204)
+def remove_case(case_id: str):
+    """Delete a case and all its data."""
+    cases = list_cases()
+    if case_id not in cases:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
+
+    if not delete_case(case_id):
+        raise HTTPException(status_code=500, detail="Failed to delete case")
+
+    return None
 
 
 @router.get("/{case_id}/summary", response_model=CaseSummary)

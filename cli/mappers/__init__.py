@@ -29,10 +29,11 @@ def get_mapper(source: str, case_path: Optional[Path] = None) -> Tuple[FieldMapp
     """Get the appropriate mapper for a source system.
 
     Lookup order:
-    1. Case-specific YAML config (cases/<case_id>/mappers/<source>.yaml)
-    2. Global bundled YAML config (cli/mappers/configs/<source>.yaml)
-    3. Built-in Python mapper
-    4. Generic fallback mapper
+    1. Unified case schema (cases/<case_id>/mappers/case_schema.yaml)
+    2. Case-specific YAML config (cases/<case_id>/mappers/<source>.yaml)
+    3. Global bundled YAML config (cli/mappers/configs/<source>.yaml)
+    4. Built-in Python mapper
+    5. Generic fallback mapper
 
     Args:
         source: Source system name (e.g., 'splunk', 'firewall')
@@ -40,11 +41,19 @@ def get_mapper(source: str, case_path: Optional[Path] = None) -> Tuple[FieldMapp
 
     Returns:
         Tuple of (mapper instance, mapper_type) where mapper_type is one of:
-        "yaml_case", "yaml_builtin", "builtin", "generic"
+        "yaml_case_schema", "yaml_case", "yaml_builtin", "builtin", "generic"
     """
     source_lower = source.lower()
 
-    # 1. Check for case-specific YAML config
+    # 1. Check for unified case schema (highest priority)
+    if case_path:
+        case_schema = case_path / "mappers" / "case_schema.yaml"
+        if case_schema.exists():
+            mapper = load_config_mapper(case_schema)
+            if mapper:
+                return mapper, "yaml_case_schema"
+
+    # 2. Check for case-specific YAML config
     if case_path:
         config_path = case_path / "mappers" / f"{source_lower}.yaml"
         if config_path.exists():
@@ -52,18 +61,18 @@ def get_mapper(source: str, case_path: Optional[Path] = None) -> Tuple[FieldMapp
             if mapper:
                 return mapper, "yaml_case"
 
-    # 2. Check for global bundled YAML config
+    # 3. Check for global bundled YAML config
     global_config = CONFIGS_DIR / f"{source_lower}.yaml"
     if global_config.exists():
         mapper = load_config_mapper(global_config)
         if mapper:
             return mapper, "yaml_builtin"
 
-    # 3. Fall back to built-in Python mappers
+    # 4. Fall back to built-in Python mappers
     if source_lower in BUILTIN_MAPPERS:
         return BUILTIN_MAPPERS[source_lower](), "builtin"
 
-    # 4. Generic mapper (last resort)
+    # 5. Generic mapper (last resort)
     return GenericMapper(), "generic"
 
 

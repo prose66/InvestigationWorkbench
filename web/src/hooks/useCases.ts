@@ -1,7 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { getCases, getCaseSummary } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getCases, getCaseSummary, createCase, deleteCase } from "@/lib/api";
 
 export function useCases() {
   return useQuery({
@@ -17,5 +17,28 @@ export function useCaseSummary(caseId: string | null) {
     queryFn: () => getCaseSummary(caseId!),
     enabled: !!caseId,
     staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function useCreateCase() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ caseId, title }: { caseId: string; title?: string }) =>
+      createCase(caseId, title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cases"] });
+    },
+  });
+}
+
+export function useDeleteCase() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (caseId: string) => deleteCase(caseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cases"] });
+    },
   });
 }

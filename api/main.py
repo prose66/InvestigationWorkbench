@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import cases, events, entities, bookmarks, markers, search, graph, gaps
+from api.routers import cases, events, entities, bookmarks, markers, search, graph, gaps, ingest
 
 # Create FastAPI app
 app = FastAPI(
@@ -18,6 +18,7 @@ app = FastAPI(
     - Search functionality
     - Entity relationship graphs
     - Coverage gap detection
+    - File ingestion with field mapping
     """,
     version="0.2.0",
     docs_url="/api/docs",
@@ -31,8 +32,6 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # React dev server
         "http://127.0.0.1:3000",
-        "http://localhost:8501",  # Streamlit
-        "http://127.0.0.1:8501",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -48,6 +47,7 @@ app.include_router(markers.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(graph.router, prefix="/api")
 app.include_router(gaps.router, prefix="/api")
+app.include_router(ingest.router, prefix="/api")
 
 
 @app.get("/api/health")

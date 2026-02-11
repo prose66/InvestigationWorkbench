@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Shield,
   Zap,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ interface SidebarProps {
 
 const navigation = [
   { name: "Overview", href: "", icon: LayoutDashboard },
+  { name: "Ingest Data", href: "/ingest", icon: Upload },
   { name: "Timeline", href: "/timeline", icon: Clock },
   { name: "Entity", href: "/entity", icon: Users },
   { name: "Graph", href: "/graph", icon: Network },

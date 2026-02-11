@@ -3,15 +3,8 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Query
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases
-from services.gaps import detect_timeline_gaps, get_source_coverage
-
+from api.services.db import list_cases
+from api.services.gaps import detect_timeline_gaps, get_source_coverage
 from api.schemas.gaps import CoverageGap, SourceCoverage
 
 router = APIRouter(prefix="/cases/{case_id}", tags=["coverage"])

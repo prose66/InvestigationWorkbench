@@ -1,16 +1,9 @@
 """Entity graph API endpoints."""
 from fastapi import APIRouter, HTTPException, Query
 
-import sys
-from pathlib import Path
-
-# Add app directory to path to import services
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "app"))
-
-from services.db import list_cases
-from services.entities import ENTITY_TYPES
-from services.graph import build_entity_graph
-
+from api.services.db import list_cases
+from api.services.entities import ENTITY_TYPES
+from api.services.graph import build_entity_graph
 from api.schemas.graph import GraphNode, GraphEdge, GraphResponse
 
 router = APIRouter(prefix="/cases/{case_id}/graph", tags=["graph"])
